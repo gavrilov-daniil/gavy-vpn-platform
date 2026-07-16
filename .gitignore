@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# env / secrets — никогда не коммитить
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# go
+apps/node-agent/bin/
+
+# os
+.DS_Store

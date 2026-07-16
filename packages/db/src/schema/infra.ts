@@ -1,0 +1,156 @@
+import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { createdAt, orgId, updatedAt } from "./_shared.js";
+import { subscription } from "./subscribers.js";
+
+// Физический хост/VPS.
+export const server = pgTable("server", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  hostname: text("hostname").notNull(),
+  primaryIp: text("primary_ip").notNull(),
+  extraIps: jsonb("extra_ips").$type<string[]>().notNull().default([]),
+  country: text("country"),
+  providerId: uuid("provider_id"),
+  sshRef: text("ssh_ref"), // ссылка в vault, не сам ключ
+  capabilities: jsonb("capabilities").$type<Record<string, unknown>>().notNull().default({}),
+  agentStatus: text("agent_status").notNull().default("unknown"),
+  agentVersion: text("agent_version"),
+  xrayVersion: text("xray_version"),
+  egressHealth: jsonb("egress_health").$type<Record<string, unknown>>().notNull().default({}),
+  lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex("server_org_hostname_uq").on(t.orgId, t.hostname)]);
+
+// NODE-side Xray-скелет (routing/dns/policy/api/stats). В текущем парке 1 профиль = 1 нода.
+export const configProfile = pgTable("config_profile", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  name: text("name").notNull(),
+  baseJson: jsonb("base_json").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: createdAt(),
+});
+
+// Шейп inbound'а + Reality-идентичность НА inbound'е (без отдельного node_inbound — YAGNI).
+// privateKey Reality в БД НЕТ никогда (только на ноде); тут только public_key/short_ids.
+export const inbound = pgTable("inbound", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  configProfileId: uuid("config_profile_id").notNull().references(() => configProfile.id),
+  tag: text("tag").notNull(), // VLESS_REALITY_DE | ru2_RELAY_IN | RU2_FRONT ...
+  protocol: text("protocol").notNull().default("vless"),
+  network: text("network").notNull().default("tcp"),
+  security: text("security").notNull().default("reality"),
+  port: integer("port").notNull(),
+  flow: text("flow").notNull().default("xtls-rprx-vision"), // пусто на grpc/xhttp/trojan
+  sni: text("sni"),
+  fingerprint: text("fingerprint").default("firefox"),
+  realityPublicKey: text("reality_public_key"),
+  realityPrivkeyRef: text("reality_privkey_ref"), // ссылка/маркер, не сам приватник
+  shortIds: jsonb("short_ids").$type<string[]>().notNull().default([]),
+  params: jsonb("params").$type<Record<string, unknown>>().notNull().default({}),
+  rawJson: jsonb("raw_json").$type<Record<string, unknown>>(),
+}, (t) => [uniqueIndex("inbound_profile_tag_uq").on(t.configProfileId, t.tag)]);
+
+// Логический Xray на сервере. Роли: exit | relay | front (могут совмещаться).
+export const node = pgTable("node", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  serverId: uuid("server_id").notNull().references(() => server.id),
+  configProfileId: uuid("config_profile_id").notNull().references(() => configProfile.id),
+  name: text("name").notNull(),
+  roles: jsonb("roles").$type<string[]>().notNull().default([]),
+  status: text("status").notNull().default("provisioning"),
+  consumptionMultiplier: integer("consumption_multiplier").notNull().default(1),
+  trackTraffic: boolean("track_traffic").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  desiredConfigVersion: integer("desired_config_version").notNull().default(0),
+  observedConfigHash: text("observed_config_hash"),
+  createdAt: createdAt(),
+});
+
+// Endpoint в подписке. Несколько host'ов на inbound = второй IP той же Reality-личности.
+export const host = pgTable("host", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  inboundId: uuid("inbound_id").notNull().references(() => inbound.id),
+  nodeId: uuid("node_id").notNull().references(() => node.id),
+  remark: text("remark").notNull(),
+  address: text("address").notNull(),
+  port: integer("port").notNull(),
+  sni: text("sni"),
+  fingerprint: text("fingerprint"),
+  alpn: text("alpn"),
+  pbk: text("pbk"),
+  sid: text("sid"),
+  flow: text("flow"),
+  tagPrefix: text("tag_prefix"), // для injectHosts / селектора балансера (префиксный!)
+  isHidden: boolean("is_hidden").notNull().default(false),
+  isDisabled: boolean("is_disabled").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  advanced: jsonb("advanced").$type<Record<string, unknown>>().notNull().default({}),
+});
+
+// Internal squad = access-control (какие inbound'ы даёт).
+export const squad = pgTable("squad", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  name: text("name").notNull(),
+});
+
+export const squadInbound = pgTable("squad_inbound", {
+  squadId: uuid("squad_id").notNull().references(() => squad.id),
+  inboundId: uuid("inbound_id").notNull().references(() => inbound.id),
+}, (t) => [uniqueIndex("squad_inbound_uq").on(t.squadId, t.inboundId)]);
+
+export const subscriptionSquad = pgTable("subscription_squad", {
+  subscriptionId: uuid("subscription_id").notNull().references(() => subscription.id),
+  squadId: uuid("squad_id").notNull().references(() => squad.id),
+}, (t) => [uniqueIndex("subscription_squad_uq").on(t.subscriptionId, t.squadId)]);
+
+// Декларативное скрещивание relay↔exit. kind = маршрутизатор проекции.
+export const cascadeLink = pgTable("cascade_link", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  kind: text("kind").notNull(), // server_forward | client_chain
+  cc: text("cc").notNull(),
+  relayNodeId: uuid("relay_node_id").references(() => node.id),
+  frontNodeId: uuid("front_node_id").references(() => node.id),
+  exitNodeId: uuid("exit_node_id").notNull().references(() => node.id),
+  exitInboundTag: text("exit_inbound_tag").notNull(),
+  linkUserUuid: uuid("link_user_uuid").notNull(), // ДЕТЕРМИНИРОВАННЫЙ: uuidv5(ns, cascade_link.id)
+  // planned | exit_ready | relay_ready | active | retiring — канал виден в subgen ТОЛЬКО при active
+  status: text("status").notNull().default("planned"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [uniqueIndex("cascade_link_uq").on(t.relayNodeId, t.exitNodeId, t.cc)]);
+
+// Оркестрация: desired (в core) ↔ reported (от агента). Сходимость по config_hash.
+export const nodeDesiredState = pgTable("node_desired_state", {
+  nodeId: uuid("node_id").primaryKey().references(() => node.id),
+  version: integer("version").notNull().default(0),
+  configHash: text("config_hash").notNull(),
+  config: jsonb("config").$type<Record<string, unknown>>().notNull(),
+  users: jsonb("users").$type<Array<{ email: string; uuid: string; level: number }>>().notNull().default([]),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const nodeReportedState = pgTable("node_reported_state", {
+  nodeId: uuid("node_id").primaryKey().references(() => node.id),
+  agentVersion: text("agent_version"),
+  xrayVersion: text("xray_version"),
+  appliedConfigHash: text("applied_config_hash"),
+  sysStats: jsonb("sys_stats").$type<Record<string, unknown>>().notNull().default({}),
+  egressHealth: jsonb("egress_health").$type<Record<string, unknown>>().notNull().default({}),
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+});
+
+// Энроллмент агента: bootstrap-токен (БД — authority, Redis только fast-path), mTLS-cert.
+export const nodeIdentity = pgTable("node_identity", {
+  nodeId: uuid("node_id").primaryKey().references(() => node.id),
+  agentPubkey: text("agent_pubkey"),
+  certFingerprint: text("cert_fingerprint"),
+  bootstrapTokenHash: text("bootstrap_token_hash"),
+  bootstrapConsumedAt: timestamp("bootstrap_consumed_at", { withTimezone: true }),
+  agentEpoch: integer("agent_epoch").notNull().default(0), // namespace для report_id (переналитая нода)
+  enrolledAt: timestamp("enrolled_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("node_identity_bootstrap_uq").on(t.bootstrapTokenHash)]);
