@@ -1,11 +1,11 @@
 import { createHmac } from "node:crypto";
 import { request } from "@vpn/core-kit";
 import { safeCompare } from "@vpn/core-kit";
+import { resolveProviderBaseUrl } from "../provider-urls.js";
 import {
   kopeksToRubles,
   requireCredential,
   settingNumber,
-  settingString,
   type CreateInvoiceInput,
   type CreatedInvoice,
   type MerchantConfig,
@@ -56,7 +56,7 @@ export const paritypayAdapter: PaymentAdapter = {
   },
 
   async createInvoice(merchant: MerchantConfig, input: CreateInvoiceInput): Promise<CreatedInvoice> {
-    const apiUrl = settingString(merchant, "api_url", "https://api.paritypay.ru").replace(/\/+$/, "");
+    const apiUrl = resolveProviderBaseUrl(merchant);
     const shopId = requireCredential(merchant, "shop_id");
     const apiKey = requireCredential(merchant, "api_key");
     const expireMin = settingNumber(merchant, "invoice_ttl_min", 30);
@@ -127,7 +127,7 @@ export const paritypayAdapter: PaymentAdapter = {
   },
 
   async healthCheck(merchant) {
-    const apiUrl = settingString(merchant, "api_url", "https://api.paritypay.ru").replace(/\/+$/, "");
+    const apiUrl = resolveProviderBaseUrl(merchant);
     const shopId = requireCredential(merchant, "shop_id");
     const apiKey = requireCredential(merchant, "api_key");
     const body = { shop_id: shopId };

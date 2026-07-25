@@ -1,10 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { request } from "@vpn/core-kit";
+import { resolveProviderBaseUrl } from "../provider-urls.js";
 import {
   kopeksToRubles,
   requireCredential,
   settingNumber,
-  settingString,
   type CreateInvoiceInput,
   type CreatedInvoice,
   type MerchantConfig,
@@ -53,7 +53,7 @@ export const oxapayAdapter: PaymentAdapter = {
   },
 
   async createInvoice(merchant: MerchantConfig, input: CreateInvoiceInput): Promise<CreatedInvoice> {
-    const apiUrl = settingString(merchant, "api_url", "https://api.oxapay.com/v1").replace(/\/+$/, "");
+    const apiUrl = resolveProviderBaseUrl(merchant);
     const apiKey = requireCredential(merchant, "merchant_api_key");
     const ttlMin = settingNumber(merchant, "invoice_ttl_min", 30);
 

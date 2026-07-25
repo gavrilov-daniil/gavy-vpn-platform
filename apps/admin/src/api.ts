@@ -14,10 +14,29 @@ export function errorMessage(e: unknown): string {
   return String(e);
 }
 
+const TOKEN_STORAGE_KEY = "vpn-admin-token";
+
+/** Токен админского API (заголовок x-admin-token). Значение ADMIN_TOKEN из env core. */
+export function getAdminToken(): string {
+  return localStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
+}
+
+export function setAdminToken(token: string): void {
+  localStorage.setItem(TOKEN_STORAGE_KEY, token.trim());
+}
+
+export function clearAdminToken(): void {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  const token = getAdminToken();
+  if (token) headers.set("x-admin-token", token);
+
   let res: Response;
   try {
-    res = await fetch(path, init);
+    res = await fetch(path, { ...init, headers });
   } catch {
     throw new ApiError(0, "сеть недоступна или сервер не отвечает");
   }

@@ -31,6 +31,15 @@ async function bootstrap() {
     return;
   }
 
+  // Пустой токен = раздел закрыт целиком (fail-closed). Кричим при старте, иначе
+  // «админка не открывается» будут дебажить по 401 в браузере.
+  if (!cfg.adminToken) {
+    log.error("ADMIN_TOKEN не задан: любой запрос к /api/admin/* получит 401");
+  }
+  if (!cfg.serviceToken) {
+    log.error("SERVICE_TOKEN не задан: любой запрос к /internal/* получит 401");
+  }
+
   // rawBody нужен для проверки подписей вебхуков по сырым байтам тела
   const app = await NestFactory.create(AppModule, { rawBody: true });
   await app.listen(cfg.port);

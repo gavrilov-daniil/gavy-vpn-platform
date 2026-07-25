@@ -798,3 +798,22 @@ select {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* --- Вход по админскому токену --- */
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  width: 340px;
+}
+
+.logout-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+}

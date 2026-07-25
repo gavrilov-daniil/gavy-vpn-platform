@@ -29,6 +29,13 @@
       "when": 1785020000000,
       "tag": "0003_drop_subscription_trial_uq",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785030000000,
+      "tag": "0004_channel_cascade_link",
+      "breakpoints": true
     }
   ]
 }

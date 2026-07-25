@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { request, safeCompare } from "@vpn/core-kit";
+import { resolveProviderBaseUrl } from "../provider-urls.js";
 import {
   kopeksToRubles,
   requireCredential,
   settingNumber,
-  settingString,
   type CreateInvoiceInput,
   type CreatedInvoice,
   type MerchantConfig,
@@ -46,7 +46,7 @@ export const pal24Adapter: PaymentAdapter = {
   },
 
   async createInvoice(merchant: MerchantConfig, input: CreateInvoiceInput): Promise<CreatedInvoice> {
-    const apiUrl = settingString(merchant, "api_url", "https://pal24.pro/api/v1").replace(/\/+$/, "");
+    const apiUrl = resolveProviderBaseUrl(merchant);
     const shopId = requireCredential(merchant, "shop_id");
     const token = requireCredential(merchant, "token");
     const ttlMin = settingNumber(merchant, "invoice_ttl_min", 30);
@@ -107,7 +107,7 @@ export const pal24Adapter: PaymentAdapter = {
   },
 
   async healthCheck(merchant) {
-    const apiUrl = settingString(merchant, "api_url", "https://pal24.pro/api/v1").replace(/\/+$/, "");
+    const apiUrl = resolveProviderBaseUrl(merchant);
     const token = requireCredential(merchant, "token");
     try {
       const res = await request<Record<string, unknown>>(`${apiUrl}/merchant/balance`, {

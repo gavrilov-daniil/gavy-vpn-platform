@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post, UnauthorizedException } from "@nestjs/common";
 import { NodeStateService } from "./node-state.service.js";
+import { CascadeService } from "./cascade.service.js";
 import { StatsService, type StatsBatch } from "./stats.service.js";
 import { loadConfig } from "../config.js";
 
@@ -14,6 +15,7 @@ export class AgentController {
 
   constructor(
     private readonly state: NodeStateService,
+    private readonly cascades: CascadeService,
     private readonly stats: StatsService,
   ) {}
 
@@ -45,7 +47,16 @@ export class AgentController {
     },
   ) {
     this.assertToken(token);
-    return this.state.report(nodeId, body);
+    const result = await this.state.report(nodeId, body);
+
+    // Статус каскада обязан быть непрерывной функцией от сходимости обеих нод, а не защёлкой
+    // на deploy(): в момент deploy ноды заведомо ещё не забрали конфиг, и без пересчёта здесь
+    // канал либо навсегда остаётся planned, либо навсегда active после отката ноды.
+    // Композиция сделана в контроллере, а не внутри report(): NodeStateService↔CascadeService
+    // дают ESM-кольцо, которое роняет процесс на старте (design:paramtypes читает класс из
+    // ещё не инициализированного модуля). Отчёт агента приходит только сюда.
+    await this.cascades.refreshForNode(nodeId);
+    return result;
   }
 
   /** Приём батча статистики. Ответ с accepted=false означает «уже принято», агент дропает буфер. */

@@ -16,7 +16,7 @@ export class SubscriptionController {
     @Res() res: Response,
   ): Promise<void> {
     const r = await this.service.deliverByShortUuid(shortUuid, ua);
-    res.set(r.headers).send(r.body);
+    res.status(r.status).set(r.headers).send(r.body);
   }
 
   @Get("api/sub/:id")
@@ -26,6 +26,6 @@ export class SubscriptionController {
     @Res() res: Response,
   ): Promise<void> {
     const r = await this.service.deliverById(id, ua);
-    res.set(r.headers).send(r.body);
+    res.status(r.status).set(r.headers).send(r.body);
   }
 }

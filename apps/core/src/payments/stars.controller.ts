@@ -1,7 +1,7 @@
 import { Body, Controller, Inject, Logger, Post } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
-import { extractOrderIdFromStarsPayload, verifyStarsCharge } from "@vpn/payments";
+import { extractOrderIdFromStarsPayload, verifyStarsCharge, STARS_INTERNAL_CONFIRM_HEADER } from "@vpn/payments";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { PaymentService } from "./payment.service.js";
@@ -82,7 +82,8 @@ export class StarsController {
         telegram_payment_charge_id: body.telegramPaymentChargeId,
         total_amount: body.totalAmount,
       }),
-      headers: {},
+      // маркер говорит stars-адаптеру, что сумма уже сверена здесь, а запрос не с улицы
+      headers: { [STARS_INTERNAL_CONFIRM_HEADER]: "1" },
     });
 
     return { ...result, paymentId: payment.id };

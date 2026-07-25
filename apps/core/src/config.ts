@@ -14,8 +14,10 @@ export interface CoreConfig {
   paymentFailUrl: string;
   /** Внутренний URL бота — через него уходят рассылки и ответы поддержки в Telegram. */
   botInternalUrl: string;
-  /** Общий секрет core↔бот, заголовок x-service-token. */
+  /** Общий секрет core↔бот, заголовок x-service-token. Пустой = /internal/* закрыт наглухо. */
   serviceToken: string;
+  /** Секрет админского API, заголовок x-admin-token. Пустой = /api/admin/* закрыт наглухо. */
+  adminToken: string;
   /** Секрет node-agent↔core, заголовок x-agent-token. */
   agentToken: string;
   /** Redis под очереди BullMQ. Пусто — очередей нет, джобы гоняются только руками. */
@@ -37,6 +39,7 @@ export function loadConfig(): CoreConfig {
     paymentFailUrl: process.env.PAYMENT_FAIL_URL ?? "",
     botInternalUrl: (process.env.BOT_INTERNAL_URL ?? "http://localhost:3300").replace(/\/+$/, ""),
     serviceToken: process.env.SERVICE_TOKEN ?? "",
+    adminToken: process.env.ADMIN_TOKEN ?? "",
     agentToken: process.env.AGENT_TOKEN ?? "",
     redisUrl: process.env.REDIS_URL ?? "",
   };

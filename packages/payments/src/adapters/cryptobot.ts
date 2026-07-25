@@ -1,10 +1,10 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { request } from "@vpn/core-kit";
+import { resolveProviderBaseUrl } from "../provider-urls.js";
 import {
   kopeksToRubles,
   requireCredential,
   settingNumber,
-  settingString,
   type CreateInvoiceInput,
   type CreatedInvoice,
   type MerchantConfig,
@@ -56,7 +56,7 @@ export const cryptobotAdapter: PaymentAdapter = {
   },
 
   async createInvoice(merchant: MerchantConfig, input: CreateInvoiceInput): Promise<CreatedInvoice> {
-    const apiUrl = settingString(merchant, "api_url", "https://pay.crypt.bot/api").replace(/\/+$/, "");
+    const apiUrl = resolveProviderBaseUrl(merchant);
     const apiToken = requireCredential(merchant, "api_token");
     const ttlSec = settingNumber(merchant, "invoice_ttl_sec", 1200);
     const asset = input.asset && DEFAULT_ASSETS.includes(input.asset) ? input.asset : "USDT";
@@ -127,7 +127,7 @@ export const cryptobotAdapter: PaymentAdapter = {
   },
 
   async healthCheck(merchant) {
-    const apiUrl = settingString(merchant, "api_url", "https://pay.crypt.bot/api").replace(/\/+$/, "");
+    const apiUrl = resolveProviderBaseUrl(merchant);
     const apiToken = requireCredential(merchant, "api_token");
     try {
       const res = await request<{ ok?: boolean }>(`${apiUrl}/getMe`, {

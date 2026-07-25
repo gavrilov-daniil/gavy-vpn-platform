@@ -1,8 +1,8 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import { decryptCredentials, encryptCredentials, maskCredentialsForDisplay } from "@vpn/core-kit";
-import { getAdapter, type MerchantConfig } from "@vpn/payments";
+import { getAdapter, isAllowedProviderApiUrl, type MerchantConfig } from "@vpn/payments";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 
@@ -13,6 +13,7 @@ import { loadConfig } from "../config.js";
  */
 @Injectable()
 export class MerchantService {
+  private readonly log = new Logger(MerchantService.name);
   private readonly cfg = loadConfig();
 
   constructor(@Inject(DB) private readonly db: Database) {}
@@ -85,7 +86,7 @@ export class MerchantService {
         title: input.title,
         mode: input.mode ?? "live",
         credentials: encryptCredentials(input.credentials ?? {}, this.cfg.secretsMasterKey),
-        settings: input.settings ?? {},
+        settings: this.sanitizeSettings(input.provider, input.settings ?? {}, input.alias),
         purposes: input.purposes ?? ["topup", "plan"],
       })
       .returning();
@@ -115,7 +116,13 @@ export class MerchantService {
     if (patch.mode !== undefined) values.mode = patch.mode;
     if (patch.priority !== undefined) values.priority = patch.priority;
     if (patch.purposes !== undefined) values.purposes = patch.purposes;
-    if (patch.settings !== undefined) values.settings = { ...current.settings, ...patch.settings };
+    if (patch.settings !== undefined) {
+      values.settings = this.sanitizeSettings(
+        current.provider,
+        { ...current.settings, ...patch.settings },
+        merchantId,
+      );
+    }
 
     if (patch.credentials) {
       const merged = { ...current.credentials };
@@ -157,6 +164,24 @@ export class MerchantService {
 
   isConfigured(row: typeof schema.paymentMerchant.$inferSelect): boolean {
     return getAdapter(row.provider).isConfigured(this.toConfig(row));
+  }
+
+  /**
+   * Настройки приходят из тела PATCH-а. Адрес API среди них опасен: адаптер пойдёт
+   * по нему с расшифрованным боевым токеном. Разрешаем только хосты из allowlist
+   * провайдера, остальное выбрасываем — адаптер возьмёт константу.
+   */
+  private sanitizeSettings(
+    provider: string,
+    settings: Record<string, unknown>,
+    merchantRef: string,
+  ): Record<string, unknown> {
+    if (!("api_url" in settings)) return settings;
+    if (isAllowedProviderApiUrl(provider, settings.api_url)) return settings;
+
+    const { api_url: rejected, ...rest } = settings;
+    this.log.warn(`merchant ${merchantRef} (${provider}): api_url ${String(rejected)} вне allowlist, настройка отброшена`);
+    return rest;
   }
 
   private async getRow(merchantId: string) {

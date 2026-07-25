@@ -11,6 +11,14 @@ import {
 
 export const STARS_INVOICE_PREFIX = "gavy-stars:";
 
+/**
+ * Маркер внутреннего подтверждения оплаты звёздами.
+ * Его ставит StarsController (internal/payments/stars/confirm) уже ПОСЛЕ сверки суммы;
+ * публичный /webhooks/* этот заголовок вырезает из входящих запросов и провайдера stars
+ * не обслуживает вовсе — снаружи маркер не подделать.
+ */
+export const STARS_INTERNAL_CONFIRM_HEADER = "x-stars-internal-confirm";
+
 export function buildStarsPayload(orderId: string): string {
   return `${STARS_INVOICE_PREFIX}${orderId}`;
 }
@@ -51,9 +59,12 @@ export const starsAdapter: PaymentAdapter = {
     };
   },
 
-  verifyWebhook(): boolean {
-    // апдейты приходят от Telegram в бота, там же проверяется secret_token вебхука
-    return true;
+  verifyWebhook(_merchant, req: WebhookRequest): boolean {
+    // Внешнего вебхука у Stars нет и быть не может: Telegram шлёт successful_payment
+    // боту, а не нам, подписи под запросом тоже нет. Поэтому единственный источник,
+    // которому здесь верим, — внутреннее подтверждение из StarsController, где сверена
+    // сумма. Любой запрос без маркера — попытка зачислить себе деньги даром.
+    return req.headers[STARS_INTERNAL_CONFIRM_HEADER] === "1";
   },
 
   parseWebhook(_merchant, req: WebhookRequest): ParsedWebhook {

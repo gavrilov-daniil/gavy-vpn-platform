@@ -48,6 +48,36 @@ test("анти-абьюз в конфиге ноды: bittorrent и SMTP в bloc
   assert.ok(rules.some((r: any) => r.port === "25" && r.outboundTag === "block"));
 });
 
+test("приватная сеть ноды и локальный gRPC API закрыты от клиента", () => {
+  const cfg = buildNodeConfig(exitNode()) as any;
+  const blockPrivate = cfg.routing.rules.find((r: any) => Array.isArray(r.ip) && r.outboundTag === "block");
+  assert.ok(blockPrivate, "нет правила блокировки приватных назначений");
+  for (const cidr of ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10", "::1/128", "fc00::/7", "fe80::/10"]) {
+    assert.ok(blockPrivate.ip.includes(cidr), `диапазон ${cidr} не закрыт`);
+  }
+});
+
+test("порядок правил: api-инбаунд ПЕРЕД блокировкой 127/8, иначе умрёт сбор статистики", () => {
+  const cfg = buildNodeConfig(exitNode()) as any;
+  const rules = cfg.routing.rules;
+  assert.deepEqual(rules[0], { type: "field", inboundTag: ["api"], outboundTag: "api" });
+  assert.equal(rules[1].outboundTag, "block");
+  assert.ok(rules[1].ip.includes("127.0.0.0/8"));
+});
+
+test("relay: правило форварда каскада идёт ПОСЛЕ блокировки приватных сетей", () => {
+  const cfg = buildNodeConfig({
+    role: "relay",
+    inbounds: [{ tag: "ru2_RELAY_IN", port: 443, role: "relay", reality, flow: "xtls-rprx-vision" }],
+    users: [],
+    cascades: [cascade],
+  }) as any;
+  const rules: any[] = cfg.routing.rules;
+  const blockIdx = rules.findIndex((r) => Array.isArray(r.ip) && r.outboundTag === "block");
+  const fwdIdx = rules.findIndex((r) => r.outboundTag === "CASCADE_FI");
+  assert.ok(blockIdx >= 0 && fwdIdx > blockIdx, "каскад не должен утаскивать приватные назначения в exit");
+});
+
 test("relay: server-forward каскад = outbound CASCADE_<CC> + правило inbound→outbound", () => {
   const cfg = buildNodeConfig({
     role: "relay",

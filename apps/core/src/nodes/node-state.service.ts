@@ -74,7 +74,9 @@ export class NodeStateService {
       version,
       configHash: hash,
       config,
-      users: users.map((u) => ({ email: u.email, uuid: u.uuid, level: u.level ?? 0 })),
+      // плоский список для агента: inboundTag здесь теряется, поэтому схлопываем по uuid —
+      // иначе юзер, состоящий в двух squad'ах, приезжает агенту N раз
+      users: [...new Map(users.map((u) => [u.uuid, { email: u.email, uuid: u.uuid, level: u.level ?? 0 }])).values()],
       generatedAt: new Date(),
     };
 
@@ -133,7 +135,13 @@ export class NodeStateService {
     return state ?? null;
   }
 
-  /** Отчёт агента: что реально применено. По нему же активируются каскады. */
+  /**
+   * Отчёт агента: что реально применено.
+   * Пересчёт статуса каскадов идёт следом, в AgentController (CascadeService.refreshForNode):
+   * тянуть CascadeService сюда нельзя — кольцо NodeStateService↔CascadeService падает
+   * на старте (design:paramtypes читает класс из ещё не инициализированного ESM-модуля),
+   * а forwardRef с emitDecoratorMetadata это не лечит.
+   */
   async report(
     nodeId: string,
     input: { appliedConfigHash?: string; agentVersion?: string; xrayVersion?: string; sysStats?: Record<string, unknown>; egressHealth?: Record<string, unknown> },
@@ -194,19 +202,32 @@ export class NodeStateService {
     const users: NodeUser[] = [];
     if (squadLinks.length > 0) {
       const squadIds = [...new Set(squadLinks.map((s) => s.squadId))];
+      // squadId тянем вместе с подпиской: без него получалось декартово произведение —
+      // подписка squad'а A уезжала на inbound'ы squad'а B (squad переставал быть
+      // access-control), а членство в двух squad'ах давало двух клиентов с одинаковым
+      // email/uuid в одном inbound → Xray не стартует («User already exists»)
       const subs = await this.db
-        .select({ sub: schema.subscription })
+        .select({ sub: schema.subscription, squadId: schema.subscriptionSquad.squadId })
         .from(schema.subscriptionSquad)
         .innerJoin(schema.subscription, eq(schema.subscriptionSquad.subscriptionId, schema.subscription.id))
         .where(inArray(schema.subscriptionSquad.squadId, squadIds));
 
-      for (const { sub } of subs) {
+      const inboundById = new Map(inboundRows.map((i) => [i.id, i]));
+      const inboundsBySquad = new Map<string, Array<typeof schema.inbound.$inferSelect>>();
+      for (const link of squadLinks) {
+        const inbound = inboundById.get(link.inboundId);
+        if (!inbound) continue;
+        const list = inboundsBySquad.get(link.squadId);
+        if (list) list.push(inbound);
+        else inboundsBySquad.set(link.squadId, [inbound]);
+      }
+
+      for (const { sub, squadId } of subs) {
         // истёкшие и отключённые на ноду не выгружаются — это и есть отключение доступа
         if (sub.status !== "active" && sub.status !== "trial") continue;
         if (sub.expireAt && sub.expireAt < new Date()) continue;
-        for (const link of squadLinks) {
-          const inbound = inboundRows.find((i) => i.id === link.inboundId);
-          if (inbound) users.push({ email: sub.shortUuid, uuid: sub.vlessUuid, inboundTag: inbound.tag });
+        for (const inbound of inboundsBySquad.get(squadId) ?? []) {
+          users.push({ email: sub.shortUuid, uuid: sub.vlessUuid, inboundTag: inbound.tag });
         }
       }
     }
@@ -227,7 +248,7 @@ export class NodeStateService {
       });
     }
 
-    return users;
+    return dedupeUsers(users);
   }
 
   /** Плечо каскада на стороне relay: outbound на exit + правило форварда. */
@@ -294,4 +315,21 @@ export class NodeStateService {
     if (!node) throw new NotFoundException(`нода ${nodeId} не найдена`);
     return node;
   }
+}
+
+/**
+ * Один клиент на inbound: пара (inboundTag, uuid) — это и есть ключ Xray, дубль валит старт.
+ * Сортировка обязательна: порядок строк из БД не гарантирован, а от порядка зависит config_hash
+ * (разъехавшийся hash = бесконечный рестарт Xray на каждой пересборке).
+ */
+function dedupeUsers(users: NodeUser[]): NodeUser[] {
+  const byKey = new Map<string, NodeUser>();
+  for (const u of users) {
+    const key = `${u.inboundTag} ${u.uuid}`;
+    if (!byKey.has(key)) byKey.set(key, u);
+  }
+  return [...byKey.values()].sort(
+    (a, b) =>
+      a.inboundTag.localeCompare(b.inboundTag) || a.email.localeCompare(b.email) || a.uuid.localeCompare(b.uuid),
+  );
 }

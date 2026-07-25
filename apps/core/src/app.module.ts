@@ -1,5 +1,6 @@
 import { Controller, Get, Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
+import { AdminGuard } from "./common/admin.guard.js";
 import { ServiceTokenGuard } from "./common/service-token.guard.js";
 import { DbModule } from "./db/db.module.js";
 import { SubscriptionModule } from "./subscription/subscription.module.js";
@@ -34,6 +35,10 @@ class HealthController {
     WorkersModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_GUARD, useClass: ServiceTokenGuard }],
+  // два гварда на разные префиксы: /internal/* — сервисный токен, /api/admin/* — админский
+  providers: [
+    { provide: APP_GUARD, useClass: ServiceTokenGuard },
+    { provide: APP_GUARD, useClass: AdminGuard },
+  ],
 })
 export class AppModule {}

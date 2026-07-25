@@ -2,11 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { getAdapter, SUPPORTED_PROVIDERS, PROVIDER_SPECS } from "./registry.js";
+import { PROVIDER_BASE_URLS, isAllowedProviderApiUrl, resolveProviderBaseUrl } from "./provider-urls.js";
 import { signParityPayParams } from "./adapters/paritypay.js";
 import { signPal24Postback } from "./adapters/pal24.js";
 import { verifyCryptoBotSignature, formatCryptoAmount } from "./adapters/cryptobot.js";
 import { verifyOxaPaySignature } from "./adapters/oxapay.js";
-import { buildStarsPayload, extractOrderIdFromStarsPayload, verifyStarsCharge } from "./adapters/stars.js";
+import {
+  buildStarsPayload,
+  extractOrderIdFromStarsPayload,
+  verifyStarsCharge,
+  STARS_INTERNAL_CONFIRM_HEADER,
+} from "./adapters/stars.js";
 import type { MerchantConfig } from "./types.js";
 
 const merchant = (provider: string, credentials: Record<string, string>, settings: Record<string, unknown> = {}): MerchantConfig => ({
@@ -204,4 +210,43 @@ test("isConfigured: мерчант без ключей не даёт созда�
     /NOT_CONFIGURED|не задан ключ/,
   );
   assert.equal(getAdapter("pal24").isConfigured(merchant("pal24", { shop_id: "1", token: "t" })), true);
+});
+
+test("Stars: внешний вебхук не подтверждает оплату — только внутренний маркер", () => {
+  const adapter = getAdapter("stars");
+  const m = merchant("stars", {}, { stars_to_kopeks_rate: 100 });
+  const rawBody = JSON.stringify({ invoice_payload: "gavy-stars:o1", total_amount: 1 });
+
+  assert.equal(adapter.verifyWebhook(m, { rawBody, headers: {} }), false, "запрос с улицы");
+  assert.equal(
+    adapter.verifyWebhook(m, { rawBody, headers: { "content-type": "application/json" } }),
+    false,
+  );
+  assert.equal(adapter.verifyWebhook(m, { rawBody, headers: { [STARS_INTERNAL_CONFIRM_HEADER]: "1" } }), true);
+});
+
+test("api_url: базовый URL берётся из констант, чужой хост игнорируется", () => {
+  const m = merchant("pal24", { shop_id: "1", token: "t" });
+  assert.equal(resolveProviderBaseUrl(m), PROVIDER_BASE_URLS.pal24);
+
+  const hijacked = merchant("pal24", { shop_id: "1", token: "t" }, { api_url: "https://evil.example.com/api" });
+  assert.equal(resolveProviderBaseUrl(hijacked), PROVIDER_BASE_URLS.pal24);
+
+  const allowed = merchant("cryptobot", { api_token: "t" }, { api_url: "https://testnet-pay.crypt.bot/api" });
+  assert.equal(resolveProviderBaseUrl(allowed), "https://testnet-pay.crypt.bot/api");
+});
+
+test("api_url: allowlist отбивает http, креды в URL и похожие хосты", () => {
+  assert.equal(isAllowedProviderApiUrl("pal24", "https://pal24.pro/api/v1"), true);
+  assert.equal(isAllowedProviderApiUrl("pal24", "http://pal24.pro/api/v1"), false, "только https");
+  assert.equal(isAllowedProviderApiUrl("pal24", "https://user:pass@pal24.pro"), false);
+  assert.equal(isAllowedProviderApiUrl("pal24", "https://pal24.pro.evil.com"), false);
+  assert.equal(isAllowedProviderApiUrl("pal24", "https://pay.crypt.bot"), false, "хост чужого провайдера");
+  assert.equal(isAllowedProviderApiUrl("stars", "https://api.telegram.org"), false, "у stars нет внешнего API");
+});
+
+test("спеки для админки не содержат редактируемый api_url", () => {
+  for (const spec of PROVIDER_SPECS) {
+    assert.equal(spec.settingFields.find((f) => f.key === "api_url"), undefined, spec.provider);
+  }
 });

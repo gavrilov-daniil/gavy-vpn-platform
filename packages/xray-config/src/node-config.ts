@@ -55,6 +55,24 @@ export interface NodeConfigInput {
 const API_TAG = "api";
 const API_PORT = 10085;
 
+/**
+ * Приватные, loopback, link-local и CGNAT-диапазоны — назначения, куда клиент ноды не имеет
+ * права ходить. Без этого правила дефолтный freedom выпускает клиента на 127.0.0.1:10085,
+ * то есть в локальный gRPC API Xray (HandlerService/StatsService) без всякой аутентификации:
+ * можно завести себе пользователя на ноде и перечислить чужие email (=shortUuid).
+ */
+const PRIVATE_DESTINATIONS = [
+  "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "::1/128",
+  "fc00::/7",
+  "fe80::/10",
+];
+
 function realityInbound(inbound: NodeInbound, users: NodeUser[]): Record<string, unknown> {
   const clients = users
     .filter((u) => u.inboundTag === inbound.tag)
@@ -144,7 +162,10 @@ export function buildNodeConfig(input: NodeConfigInput): XrayConfig {
   }
 
   const rules: Array<Record<string, unknown>> = [
+    // ПЕРВЫМ и только первым: следующее правило режет 127/8, а сам api-инбаунд ходит
+    // на 127.0.0.1 — переставь местами, и агент перестанет снимать статистику
     { type: "field", inboundTag: [API_TAG], outboundTag: API_TAG },
+    { type: "field", ip: PRIVATE_DESTINATIONS, outboundTag: "block" },
     // анти-абьюз дешёвым конфигом: торренты и спам режем на всех ролях
     { type: "field", protocol: ["bittorrent"], outboundTag: "block" },
   ];

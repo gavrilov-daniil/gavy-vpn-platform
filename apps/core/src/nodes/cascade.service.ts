@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
@@ -96,14 +96,36 @@ export class CascadeService {
     const relayOk = link.relayNodeId ? await this.isConverged(link.relayNodeId) : false;
 
     const status = exitOk && relayOk ? "active" : exitOk ? "exit_ready" : "planned";
+    // вызов идёт с частотой heartbeat'а агента — без изменения статуса не пишем в БД
+    if (status === link.status) return link;
+
     const [updated] = await this.db
       .update(schema.cascadeLink)
       .set({ status, updatedAt: new Date() })
       .where(eq(schema.cascadeLink.id, cascadeLinkId))
       .returning();
 
-    if (status !== link.status) this.log.log(`каскад ${link.cc}: ${link.status} → ${status}`);
+    this.log.log(`каскад ${link.cc}: ${link.status} → ${status}`);
     return updated;
+  }
+
+  /**
+   * Пересчёт статуса всех каскадов, где нода — одно из плеч. Зовётся после отчёта агента:
+   * именно сходимость ноды по config_hash переводит канал в active и обратно.
+   */
+  async refreshForNode(nodeId: string): Promise<number> {
+    const links = await this.db
+      .select({ id: schema.cascadeLink.id })
+      .from(schema.cascadeLink)
+      .where(
+        and(
+          eq(schema.cascadeLink.orgId, this.cfg.defaultOrgId),
+          or(eq(schema.cascadeLink.exitNodeId, nodeId), eq(schema.cascadeLink.relayNodeId, nodeId)),
+        ),
+      );
+
+    for (const link of links) await this.refreshStatus(link.id);
+    return links.length;
   }
 
   /** Нода сошлась, если применённый hash совпадает с желаемым. */

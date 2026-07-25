@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Logger, Param, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { PROVIDER_SPECS } from "@vpn/payments";
+import { PROVIDER_SPECS, STARS_INTERNAL_CONFIRM_HEADER } from "@vpn/payments";
 import { PaymentService } from "./payment.service.js";
 import { MerchantService } from "./merchant.service.js";
 import { IdempotencyService } from "../common/idempotency.service.js";
@@ -31,10 +31,22 @@ export class PaymentsController {
     @Req() req: RawBodyRequest,
     @Res() res: Response,
   ): Promise<void> {
+    // У Stars внешнего вебхука нет: Telegram шлёт successful_payment боту, и подтверждение
+    // приходит на internal/payments/stars/confirm, где сверяется сумма. Публичная точка без
+    // подписи означала бы «зачисли себе любую сумму бесплатно».
+    if (provider.toLowerCase() === "stars") {
+      this.log.warn("webhook stars: публичного вебхука у Stars нет, запрос отклонён");
+      res.status(404).send({ ok: false });
+      return;
+    }
+
     const rawBody = req.rawBody?.toString("utf8") ?? JSON.stringify(req.body ?? {});
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(req.headers)) {
-      if (typeof v === "string") headers[k.toLowerCase()] = v;
+      const key = k.toLowerCase();
+      // маркер внутреннего подтверждения снаружи прийти не может
+      if (key === STARS_INTERNAL_CONFIRM_HEADER) continue;
+      if (typeof v === "string") headers[key] = v;
     }
 
     try {

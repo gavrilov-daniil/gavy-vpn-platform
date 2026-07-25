@@ -1,7 +1,7 @@
 import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { createdAt, orgId } from "./_shared.js";
 import { subscription } from "./subscribers.js";
-import { host } from "./infra.js";
+import { cascadeLink, host } from "./infra.js";
 
 // «Базовый балансер-конфиг» (клиентский скелет): balancer/observatory/loopback/policy/DNS
 // + точки инъекции хостов. Версионный, бэкап при изменении (правило 4 vpn-network-2).
@@ -35,6 +35,9 @@ export const channel = pgTable("channel", {
   cc: text("cc"),
   hostId: uuid("host_id").references(() => host.id),
   frontNodeId: uuid("front_node_id"),
+  // без этой связи subgen не может проверить готовность каскада и публикует канал,
+  // у которого одно плечо ещё не применило конфиг — трафик клиента уходит в никуда
+  cascadeLinkId: uuid("cascade_link_id").references(() => cascadeLink.id),
 });
 
 // Какие каналы в профиле и на каком tier'е (1 = primary/direct, 2 = fallback/cascade).
