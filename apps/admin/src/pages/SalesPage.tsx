@@ -276,7 +276,7 @@ function DailyChart({ daily }: { daily: Funnel["daily"] }) {
   const step = Math.ceil(daily.length / 12);
 
   return (
-    <svg className="chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+    <svg className="chart" viewBox={`0 0 ${width} ${height}`}>
       {daily.map((d, i) => {
         const h = ((height - padding.top - padding.bottom) * d.revenueKopeks) / maxRevenue;
         const x = padding.left + slot * i + (slot - barWidth) / 2;

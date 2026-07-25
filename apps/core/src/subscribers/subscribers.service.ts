@@ -171,6 +171,73 @@ export class SubscribersService {
       .orderBy(schema.plan.sortOrder);
   }
 
+  /** Для админки — включая выключенные тарифы. */
+  async listAllPlans() {
+    return this.db
+      .select()
+      .from(schema.plan)
+      .where(eq(schema.plan.orgId, this.cfg.defaultOrgId))
+      .orderBy(schema.plan.sortOrder);
+  }
+
+  async createPlan(input: {
+    code: string;
+    title: string;
+    periodDays: number;
+    priceKopeks: number;
+    trafficGb?: number;
+    deviceLimit?: number;
+    isTrial?: boolean;
+    sortOrder?: number;
+    squadIds?: string[];
+  }) {
+    const [row] = await this.db
+      .insert(schema.plan)
+      .values({
+        orgId: this.cfg.defaultOrgId,
+        code: input.code,
+        title: input.title,
+        periodDays: input.periodDays,
+        priceKopeks: input.priceKopeks,
+        trafficGb: input.trafficGb,
+        deviceLimit: input.deviceLimit,
+        isTrial: input.isTrial ?? false,
+        sortOrder: input.sortOrder ?? 0,
+        squadIds: input.squadIds ?? [],
+      })
+      .returning();
+    return row;
+  }
+
+  async updatePlan(
+    planId: string,
+    patch: {
+      title?: string;
+      periodDays?: number;
+      priceKopeks?: number;
+      trafficGb?: number | null;
+      deviceLimit?: number | null;
+      isActive?: boolean;
+      isTrial?: boolean;
+      sortOrder?: number;
+      squadIds?: string[];
+    },
+  ) {
+    const values: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) values[key] = value;
+    }
+    if (Object.keys(values).length === 0) throw new BadRequestException("нечего обновлять");
+
+    const [row] = await this.db
+      .update(schema.plan)
+      .set(values)
+      .where(and(eq(schema.plan.orgId, this.cfg.defaultOrgId), eq(schema.plan.id, planId)))
+      .returning();
+    if (!row) throw new NotFoundException("тариф не найден");
+    return row;
+  }
+
   /**
    * Активация триала. Выдаётся один раз на подписчика — отметка trial_used_at
    * ставится условным UPDATE, поэтому параллельные запросы не выдадут два триала.

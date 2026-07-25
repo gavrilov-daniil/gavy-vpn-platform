@@ -762,7 +762,8 @@ select {
 
 .chart {
   width: 100%;
-  height: 200px;
+  height: auto;
+  max-height: 220px;
 }
 
 .chart .bar {
