@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import {
   buildNodeConfig,
@@ -68,27 +68,45 @@ export class NodeStateService {
 
     if (existing?.configHash === hash) return { changed: false, version: existing.version, hash };
 
-    const version = (existing?.version ?? 0) + 1;
-    const payload = {
-      nodeId,
-      version,
-      configHash: hash,
-      config,
-      // плоский список для агента: inboundTag здесь теряется, поэтому схлопываем по uuid —
-      // иначе юзер, состоящий в двух squad'ах, приезжает агенту N раз
-      users: [...new Map(users.map((u) => [u.uuid, { email: u.email, uuid: u.uuid, level: u.level ?? 0 }])).values()],
-      generatedAt: new Date(),
-    };
+    // плоский список для агента: inboundTag здесь теряется, поэтому схлопываем по uuid —
+    // иначе юзер, состоящий в двух squad'ах, приезжает агенту N раз
+    const flatUsers = [
+      ...new Map(users.map((u) => [u.uuid, { email: u.email, uuid: u.uuid, level: u.level ?? 0 }])).values(),
+    ];
 
-    if (existing) {
-      await this.db.update(schema.nodeDesiredState).set(payload).where(eq(schema.nodeDesiredState.nodeId, nodeId));
-    } else {
-      await this.db.insert(schema.nodeDesiredState).values(payload);
+    // upsert, а не select+insert/update: ноду параллельно пересобирают api и воркер,
+    // read-modify-write давал 23505 и терял версию. Версия растёт в SQL, а setWhere
+    // гасит вторую запись того же конфига — версия не скачет вхолостую.
+    const [written] = await this.db
+      .insert(schema.nodeDesiredState)
+      .values({ nodeId, version: 1, configHash: hash, config, users: flatUsers, generatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: schema.nodeDesiredState.nodeId,
+        set: {
+          version: sql`${schema.nodeDesiredState.version} + 1`,
+          configHash: hash,
+          config,
+          users: flatUsers,
+          generatedAt: new Date(),
+        },
+        setWhere: ne(schema.nodeDesiredState.configHash, hash),
+      })
+      .returning({ version: schema.nodeDesiredState.version });
+
+    if (!written) {
+      // конкурент записал тот же конфиг между проверкой и upsert — состояние уже актуально
+      const current = await this.loadState(nodeId);
+      return { changed: false, version: current?.version ?? 0, hash };
     }
-    await this.db.update(schema.node).set({ desiredConfigVersion: version }).where(eq(schema.node.id, nodeId));
 
-    this.log.log(`node ${node.name}: desired-state v${version} (${hash.slice(0, 12)})`);
-    return { changed: true, version, hash };
+    // greatest: параллельный rebuild мог записать версию выше, откатывать её нельзя
+    await this.db
+      .update(schema.node)
+      .set({ desiredConfigVersion: sql`greatest(${schema.node.desiredConfigVersion}, ${written.version})` })
+      .where(eq(schema.node.id, nodeId));
+
+    this.log.log(`node ${node.name}: desired-state v${written.version} (${hash.slice(0, 12)})`);
+    return { changed: true, version: written.version, hash };
   }
 
   /**
@@ -146,8 +164,7 @@ export class NodeStateService {
     nodeId: string,
     input: { appliedConfigHash?: string; agentVersion?: string; xrayVersion?: string; sysStats?: Record<string, unknown>; egressHealth?: Record<string, unknown> },
   ) {
-    const values = {
-      nodeId,
+    const reported = {
       appliedConfigHash: input.appliedConfigHash,
       agentVersion: input.agentVersion,
       xrayVersion: input.xrayVersion,
@@ -155,17 +172,13 @@ export class NodeStateService {
       egressHealth: input.egressHealth ?? {},
       heartbeatAt: new Date(),
     };
-    const [existing] = await this.db
-      .select()
-      .from(schema.nodeReportedState)
-      .where(eq(schema.nodeReportedState.nodeId, nodeId))
-      .limit(1);
 
-    if (existing) {
-      await this.db.update(schema.nodeReportedState).set(values).where(eq(schema.nodeReportedState.nodeId, nodeId));
-    } else {
-      await this.db.insert(schema.nodeReportedState).values(values);
-    }
+    // upsert: два отчёта агента подряд (или отчёт на фоне первой регистрации) не должны
+    // ловить 23505 на select+insert
+    await this.db
+      .insert(schema.nodeReportedState)
+      .values({ nodeId, ...reported })
+      .onConflictDoUpdate({ target: schema.nodeReportedState.nodeId, set: reported });
 
     await this.db
       .update(schema.node)

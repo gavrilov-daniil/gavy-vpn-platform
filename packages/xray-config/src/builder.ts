@@ -106,14 +106,26 @@ export function buildProfileConfig(input: GeneratorInput, profile: ProfileInput)
     });
   }
 
+  // Единственный канал без резерва — балансер не нужен: трафик идёт прямо в outbound.
+  // Так устроены боевые профили «Россия» и «Белые списки» (сверено спайком golden-diff).
+  // Балансер из одного кандидата не даёт ничего, но тянет за собой observatory
+  // и лишние пробы через канал.
+  const singleChannel = !hasFallback && primary.length === 1 ? primary[0] : null;
+
   // --- balancers (tier1 direct, tier2 cascade). Последний tier — БЕЗ fallbackTag. ---
-  const tier1Selector = primary.map((c) => c.tag);
   const balancers: Array<Record<string, unknown>> = [];
-  if (hasFallback) {
-    balancers.push({ tag: "tier1", selector: tier1Selector, fallbackTag: "lo-out-1", strategy: { type: "leastPing" } });
-    balancers.push({ tag: "tier2", selector: fallback.map((c) => c.tag), strategy: { type: "leastPing" } });
+  if (singleChannel) {
+    // балансеров нет вовсе
+  } else if (hasFallback) {
+    balancers.push({
+      tag: "tier1",
+      selector: primary.map((c) => c.tag),
+      fallbackTag: "lo-out-1",
+      strategy: { type: "leastPing" },
+    });
+    // резервный тир: плечи равнозначны, а пробы через каскад дороги — как в бою
+    balancers.push({ tag: "tier2", selector: fallback.map((c) => c.tag), strategy: { type: "random" } });
   } else {
-    // один тир (напр. FI: direct нет — единственный балансер без fallback)
     const only = primary.length ? primary : fallback;
     balancers.push({ tag: "tier1", selector: only.map((c) => c.tag), strategy: { type: "leastPing" } });
   }
@@ -126,24 +138,31 @@ export function buildProfileConfig(input: GeneratorInput, profile: ProfileInput)
     // loopback-реинжект ДО catch-all
     rules.push({ type: "field", inboundTag: ["lo-in-1"], balancerTag: "tier2" });
   }
-  rules.push({ type: "field", network: "tcp,udp", balancerTag: "tier1" });
+  rules.push(
+    singleChannel
+      ? { type: "field", network: "tcp,udp", outboundTag: singleChannel.tag }
+      : { type: "field", network: "tcp,udp", balancerTag: "tier1" },
+  );
 
-  // --- observatory: top-level (не burst), subjectSelector = union всех selector ---
-  const subjectSelector = uniq(balancers.flatMap((b) => b.selector as string[]));
-  const observatory = {
-    subjectSelector,
-    probeUrl: input.probeUrl ?? DEFAULT_PROBE_URL,
-    probeInterval: input.probeInterval ?? DEFAULT_PROBE_INTERVAL,
-  };
-
-  return {
+  const config: XrayConfig = {
     log: { loglevel: "warning" },
     dns: buildDns(input.domainList, ruSplit),
     inbounds,
     outbounds,
     routing: { domainStrategy: "AsIs", balancers, rules },
-    observatory,
   };
+
+  // Observatory нужна только балансерам: без них измерять нечего, а пробы
+  // впустую гоняли бы трафик через единственный канал.
+  if (balancers.length > 0) {
+    config.observatory = {
+      subjectSelector: uniq(balancers.flatMap((b) => b.selector as string[])),
+      probeUrl: input.probeUrl ?? DEFAULT_PROBE_URL,
+      probeInterval: input.probeInterval ?? DEFAULT_PROBE_INTERVAL,
+    };
+  }
+
+  return config;
 }
 
 /** Профиль «Авто»: все direct в primary, все cascade в fallback. Эквивалент базового Remnawave-вывода. */

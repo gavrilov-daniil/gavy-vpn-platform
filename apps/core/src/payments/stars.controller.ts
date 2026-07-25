@@ -1,10 +1,19 @@
 import { Body, Controller, Inject, Logger, Post } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
-import { extractOrderIdFromStarsPayload, verifyStarsCharge, STARS_INTERNAL_CONFIRM_HEADER } from "@vpn/payments";
+import {
+  extractOrderIdFromStarsPayload,
+  settingNumber,
+  verifyStarsCharge,
+  STARS_INTERNAL_CONFIRM_HEADER,
+} from "@vpn/payments";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
+import { MerchantService } from "./merchant.service.js";
 import { PaymentService } from "./payment.service.js";
+
+/** Тот же дефолт, что у stars-адаптера: курс должен совпасть с тем, по которому выставлен счёт. */
+const DEFAULT_STARS_TO_KOPEKS_RATE = 100;
 
 /**
  * Telegram Stars. Внешнего вебхука нет: апдейты приходят в бота, он зовёт эти эндпоинты.
@@ -19,6 +28,7 @@ export class StarsController {
   constructor(
     @Inject(DB) private readonly db: Database,
     private readonly payments: PaymentService,
+    private readonly merchants: MerchantService,
   ) {}
 
   /**
@@ -34,8 +44,7 @@ export class StarsController {
     if (!payment) return { ok: false, reason: "payment_not_found" };
     if (payment.status === "paid") return { ok: false, reason: "already_paid" };
 
-    const rate = 100; // копеек за звезду; согласовано с настройкой мерчанта
-    const expectedStars = Math.max(1, Math.ceil(payment.amountKopeks / rate));
+    const expectedStars = await this.expectedStars(payment);
     if (body.totalAmount !== expectedStars) {
       this.log.warn(`stars pre-checkout: сумма не совпала (${body.totalAmount} ≠ ${expectedStars})`);
       return { ok: false, reason: "amount_mismatch" };
@@ -63,8 +72,7 @@ export class StarsController {
     const payment = await this.findByOrderId(orderId);
     if (!payment) return { ok: false, reason: "payment_not_found" };
 
-    const rate = 100;
-    const expectedStars = Math.max(1, Math.ceil(payment.amountKopeks / rate));
+    const expectedStars = await this.expectedStars(payment);
     const check = verifyStarsCharge({
       invoicePayload: body.invoicePayload,
       totalAmount: body.totalAmount,
@@ -87,6 +95,20 @@ export class StarsController {
     });
 
     return { ...result, paymentId: payment.id };
+  }
+
+  /**
+   * Курс берём у мерчанта платежа — тем же путём, каким его брал адаптер при выставлении счёта.
+   * Захардкоженные 100 копеек за звезду ломали канал при любом другом курсе: сумма из Telegram
+   * никогда не сходилась с ожидаемой и pre-checkout всегда отвечал amount_mismatch.
+   */
+  private async expectedStars(payment: typeof schema.payment.$inferSelect): Promise<number> {
+    let rate = DEFAULT_STARS_TO_KOPEKS_RATE;
+    if (payment.merchantId) {
+      const merchant = await this.merchants.getConfig(payment.merchantId);
+      rate = settingNumber(merchant, "stars_to_kopeks_rate", DEFAULT_STARS_TO_KOPEKS_RATE);
+    }
+    return Math.max(1, Math.ceil(payment.amountKopeks / rate));
   }
 
   private async findByOrderId(orderId: string) {

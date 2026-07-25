@@ -28,8 +28,18 @@ const isPrivateIp = (r: Rule) =>
 const isRuDirect = (r: Rule) =>
   r.outboundTag === "freedom" && !isPrivateIp(r) && (arr(r.domain).length > 0 || arr(r.ip).length > 0);
 
-const isCatchAll = (r: Rule) =>
-  Boolean(r.balancerTag) && !r.domain && !r.ip && !r.inboundTag && !r.protocol && !r.port;
+/**
+ * Финальное правило «весь остальной трафик — туда».
+ * Целью может быть и балансер, и конкретный outbound: профиль с единственным
+ * каналом («Россия», «Белые списки») идёт вообще без балансеров.
+ * Служебные freedom/block целью catch-all быть не могут — это означало бы,
+ * что весь трафик уходит мимо туннеля или в никуда.
+ */
+const isCatchAll = (r: Rule) => {
+  const target = r.balancerTag ?? r.outboundTag;
+  if (!target || target === "freedom" || target === "block") return false;
+  return !r.domain && !r.ip && !r.inboundTag && !r.protocol && !r.port;
+};
 
 /**
  * Инвариант-валидатор. Нарушение любого пункта = молчаливый отвал клиента,
@@ -167,9 +177,11 @@ export function validateConfig(config: XrayConfig): ValidationResult {
     errors.push("burstObservatory не использовать (баг Xray #5897) — только top-level observatory");
   }
   const obs = config.observatory as Record<string, unknown> | undefined;
-  if (!obs) {
+  // Профиль с единственным каналом идёт без балансера (как боевые «Россия» и
+  // «Белые списки») — измерять там нечего, отсутствие observatory это норма.
+  if (!obs && balancers.length > 0) {
     errors.push("нет top-level observatory (burstObservatory не использовать — баг Xray #5897)");
-  } else {
+  } else if (obs) {
     const subj = new Set(strings(obs.subjectSelector));
     for (const b of balancers) {
       for (const s of strings(b.selector)) {
@@ -199,7 +211,7 @@ export function validateConfig(config: XrayConfig): ValidationResult {
   if (quicIdx === -1) errors.push("нет правила block udp:443 — QUIC пойдёт мимо split-routing");
   if (btIdx === -1) errors.push("нет правила block bittorrent");
   if (privIdx === -1) errors.push("нет правила приватные CIDR → freedom — локальная сеть уедет в туннель");
-  if (catchAllIdx === -1) errors.push("нет catch-all правила на балансер — весь незаматченный трафик встанет");
+  if (catchAllIdx === -1) errors.push("нет catch-all правила — весь незаматченный трафик встанет");
 
   // Порядок сверен с боевой выдачей действующей панели (спайк golden-diff):
   // приватные сети идут ПЕРВЫМИ — локальный трафик не должен зависеть ни от

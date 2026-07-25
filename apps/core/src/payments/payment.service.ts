@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { schema, type Database } from "@vpn/db";
+import { maskBody } from "@vpn/core-kit";
 import { getAdapter, type PaymentPurpose, type WebhookRequest } from "@vpn/payments";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
@@ -92,7 +93,11 @@ export class PaymentService {
           cryptoAsset: invoice.cryptoAsset,
           cryptoAmount: invoice.cryptoAmount,
           exchangeRate: invoice.exchangeRate,
-          meta: { invoice: invoice.raw ?? null },
+          // курс зафиксирован в момент ответа провайдера — без отметки времени
+          // непонятно, по какому курсу считать недоплату спустя сутки
+          rateLockedAt: invoice.exchangeRate ? new Date() : undefined,
+          // сырой ответ провайдера нужен для разбора, но лежит в БД годами — маскируем
+          meta: { invoice: maskBody(invoice.raw ?? null) },
         })
         .where(eq(schema.payment.id, payment.id));
 

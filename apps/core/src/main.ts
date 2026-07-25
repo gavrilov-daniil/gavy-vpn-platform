@@ -1,11 +1,37 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { Logger } from "@nestjs/common";
+import { setAuditSink } from "@vpn/core-kit";
+import { schema, type Database } from "@vpn/db";
 import { AppModule } from "./app.module.js";
 import { loadConfig } from "./config.js";
+import { DB } from "./db/db.module.js";
 import { JobRegistry } from "./workers/job.registry.js";
 import { QueueService } from "./workers/queue.service.js";
 import { SchedulerService } from "./workers/scheduler.service.js";
+
+/**
+ * Аудит исходящих HTTP: core-kit маскирует секреты и зовёт этот приёмник, приёмник пишет строку.
+ * Без подключения таблица external_api_log оставалась пустой, и разбирать «провайдер не ответил»
+ * было нечем. Падение записи проглатывается в core-kit — аудит не должен ронять бизнес-вызов.
+ */
+function installAuditSink(db: Database, orgId: string): void {
+  setAuditSink(async (record) => {
+    await db.insert(schema.externalApiLog).values({
+      orgId,
+      provider: record.provider,
+      endpoint: record.endpoint,
+      method: record.method,
+      requestBody: record.requestBody ?? null,
+      responseBody: record.responseBody ?? null,
+      statusCode: record.statusCode,
+      durationMs: record.durationMs,
+      attempts: record.attempts,
+      correlationId: record.correlationId,
+      errorMessage: record.errorMessage,
+    });
+  });
+}
 
 async function bootstrap() {
   const cfg = loadConfig();
@@ -27,6 +53,7 @@ async function bootstrap() {
     // тот же контекст, что у api, но без HTTP: консьюмер очереди + cron-эмиттер на лидере
     const ctx = await NestFactory.createApplicationContext(AppModule);
     ctx.enableShutdownHooks();
+    installAuditSink(ctx.get<Database>(DB), cfg.defaultOrgId);
 
     const registry = ctx.get(JobRegistry);
     const queue = ctx.get(QueueService);
@@ -54,6 +81,7 @@ async function bootstrap() {
 
   // rawBody нужен для проверки подписей вебхуков по сырым байтам тела
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  installAuditSink(app.get<Database>(DB), cfg.defaultOrgId);
   await app.listen(cfg.port);
   log.log(`core api on :${cfg.port} (org=${cfg.defaultOrgId})`);
 }

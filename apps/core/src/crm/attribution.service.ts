@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
@@ -118,19 +118,11 @@ export class AttributionService {
         return { counted: false as const, reason: "already_counted" as const };
       }
 
-      // paying_users — уникальные плательщики: считаем только первый платёж юзера по этой ссылке
-      const [prior] = await tx
-        .select({ count: sql<string>`count(*)` })
-        .from(schema.campaignEvent)
-        .where(
-          and(
-            eq(schema.campaignEvent.campaignLinkId, campaignLinkId),
-            eq(schema.campaignEvent.type, "payment"),
-            eq(schema.campaignEvent.subscriberId, payment.subscriberId),
-            ne(schema.campaignEvent.id, inserted[0].id),
-          ),
-        );
-      const isNewPayer = Number(prior?.count ?? 0) === 0;
+      // paying_users — уникальные плательщики. Считаем по флагу первой оплаты, который
+      // проставляется под partial unique payment_first_paid_uq: у подписчика он есть ровно
+      // у одного платежа, поэтому два параллельных первых платежа дают +1, а не +2.
+      // Подсчёт прошлых событий этого не давал: оба видели «прошлых нет» до блокировки строки.
+      const isNewPayer = payment.isFirstPaid;
 
       await tx
         .update(schema.campaignLink)

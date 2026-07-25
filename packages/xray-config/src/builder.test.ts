@@ -45,9 +45,10 @@ test("двухтирный профиль: loopback-цепочка целост�
   assert.ok(cfg.inbounds.some((i: any) => i.tag === "lo-in-1" && i.port === 0 && i.listen === "127.0.0.1"));
 });
 
-test("single-tier профиль (только cascade, как FI) — балансер без fallback, без loopback", () => {
+test("single-tier профиль (только каскады, как FI) — балансер без fallback, без loopback", () => {
   const input = fixture();
-  const profile: ProfileInput = { remark: "🇫🇮 Финляндия", primary: ["pl-cascade"], fallback: [] };
+  // два канала: с одним балансер не создаётся вовсе (см. отдельный тест про «Россию»)
+  const profile: ProfileInput = { remark: "🇫🇮 Финляндия", primary: ["pl-cascade", "de-direct"], fallback: [] };
   const cfg = buildProfileConfig(input, profile) as any;
   assert.equal(validateConfig(cfg).ok, true);
   assert.equal(cfg.routing.balancers.length, 1);
@@ -82,7 +83,7 @@ test("валидатор ловит последний tier с fallbackTag (пе
 });
 
 test("ruSplit по умолчанию: РФ-домены и РФ-CIDR идут в freedom, DNS разведён на РФ-резолвер", () => {
-  const cfg = buildProfileConfig(fixture(), { remark: "🇩🇪 Германия", primary: ["de-direct"], fallback: [] }) as any;
+  const cfg = buildProfileConfig(fixture(), { remark: "🇩🇪 Германия", primary: ["de-direct", "pl-direct"], fallback: [] }) as any;
   assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.domain) && r.domain.includes("domain:ru")));
   assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("77.88.0.0/18")));
   assert.equal(cfg.dns.servers.length, 3); // РФ DoH + зарубежный DoH + plain-fallback (как в боевой выдаче)
@@ -90,7 +91,7 @@ test("ruSplit по умолчанию: РФ-домены и РФ-CIDR идут �
 });
 
 test("ruSplit=false: РФ-правил и РФ-резолвера нет, конфиг остаётся валидным", () => {
-  const profile: ProfileInput = { remark: "🇷🇺 Россия", primary: ["de-direct"], fallback: [], ruSplit: false };
+  const profile: ProfileInput = { remark: "🇷🇺 Россия", primary: ["de-direct", "pl-direct"], fallback: [], ruSplit: false };
   const cfg = buildProfileConfig(fixture(), profile) as any;
   assert.ok(!cfg.routing.rules.some((r: any) => Array.isArray(r.domain)));
   assert.ok(!cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("77.88.0.0/18")));
@@ -225,10 +226,53 @@ test("projectVariants отдаёт массив с remark на профиль", 
   const input = fixture();
   const profiles: ProfileInput[] = [
     { remark: "🔀 Авто", isAuto: true, primary: ["de-direct", "pl-direct"], fallback: ["pl-cascade"] },
-    { remark: "🇩🇪 Германия", primary: ["de-direct"], fallback: [] },
+    { remark: "🇩🇪 Германия", primary: ["de-direct", "pl-direct"], fallback: [] },
   ];
   const rendered = projectVariants(input, profiles);
   assert.equal(rendered.length, 2);
   assert.equal(rendered[0].remark, "🔀 Авто");
   assert.ok(rendered.every((r) => validateConfig(r.config).ok));
+});
+
+test("профиль с одним каналом идёт БЕЗ балансера — как боевые «Россия» и «Белые списки»", () => {
+  const input = fixture();
+  const cfg = buildProfileConfig(input, { remark: "🇷🇺 Россия", primary: ["de-direct"], fallback: [] }) as any;
+
+  assert.equal(cfg.routing.balancers.length, 0, "балансер из одного кандидата не нужен");
+  assert.equal(cfg.observatory, undefined, "без балансеров измерять нечего");
+  const catchAll = cfg.routing.rules.at(-1);
+  assert.equal(catchAll.outboundTag, "de-direct", "catch-all должен идти прямо в outbound");
+  assert.equal(catchAll.balancerTag, undefined);
+  assert.equal(validateConfig(cfg).ok, true);
+});
+
+test("профиль «Россия»: ruSplit=false + один канал (РФ-трафик идёт В туннель)", () => {
+  const input = fixture();
+  const cfg = buildProfileConfig(input, {
+    remark: "🇷🇺 Россия",
+    primary: ["de-direct"],
+    fallback: [],
+    ruSplit: false,
+  }) as any;
+
+  assert.equal(cfg.routing.rules.filter((r: any) => r.domain).length, 0, "РФ-доменов быть не должно");
+  assert.equal(cfg.routing.balancers.length, 0);
+  assert.equal(validateConfig(cfg).ok, true);
+});
+
+test("два канала без резерва — балансер остаётся (выбирать есть из чего)", () => {
+  const input = fixture();
+  const cfg = buildProfileConfig(input, { remark: "две ноды", primary: ["de-direct", "pl-direct"], fallback: [] }) as any;
+  assert.equal(cfg.routing.balancers.length, 1);
+  assert.ok(cfg.observatory, "с балансером observatory обязательна");
+  assert.equal(validateConfig(cfg).ok, true);
+});
+
+test("резервный тир каскадов идёт с random — как в боевой конфигурации", () => {
+  const input = fixture();
+  const cfg = buildProfileConfig(input, { remark: "PL", primary: ["pl-direct"], fallback: ["pl-cascade"] }) as any;
+  const [tier1, tier2] = cfg.routing.balancers;
+  assert.equal(tier1.strategy.type, "leastPing", "первичный тир обязан мерить задержку");
+  assert.equal(tier2.strategy.type, "random");
+  assert.equal(validateConfig(cfg).ok, true);
 });
