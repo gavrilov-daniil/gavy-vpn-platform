@@ -10,6 +10,11 @@ export default defineConfig({
         target: "http://localhost:3100",
         changeOrigin: true,
       },
+      // тарифы отдаются публичным API core, а не под /api
+      "/v1": {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+      },
     },
   },
 });

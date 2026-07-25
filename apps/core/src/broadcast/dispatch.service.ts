@@ -8,7 +8,7 @@ import { BotClient } from "../bot/bot.client.js";
 export interface DispatchInput {
   subscriberId: string;
   telegramId: number;
-  kind: "broadcast" | "touchpoint";
+  kind: "broadcast" | "touchpoint" | "transactional";
   refId: string;
   dedupKey: string;
   bodyHtml: string;

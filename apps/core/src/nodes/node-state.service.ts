@@ -89,6 +89,30 @@ export class NodeStateService {
     return { changed: true, version, hash };
   }
 
+  /**
+   * Пересборка всех нод org. Дёшево: rebuild не поднимает версию, если конфиг не изменился,
+   * поэтому это безопасно гонять по расписанию как safety-net.
+   */
+  async rebuildAll(): Promise<{ total: number; changed: string[]; failed: string[] }> {
+    const nodes = await this.db
+      .select({ id: schema.node.id, name: schema.node.name })
+      .from(schema.node)
+      .where(eq(schema.node.orgId, this.cfg.defaultOrgId));
+
+    const changed: string[] = [];
+    const failed: string[] = [];
+    for (const n of nodes) {
+      try {
+        const result = await this.rebuild(n.id);
+        if (result.changed) changed.push(n.id);
+      } catch (err) {
+        failed.push(n.id);
+        this.log.error(`node ${n.name}: пересборка не удалась — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return { total: nodes.length, changed, failed };
+  }
+
   async getDesiredState(nodeId: string): Promise<typeof schema.nodeDesiredState.$inferSelect> {
     const existing = await this.loadState(nodeId);
     if (existing) return existing;

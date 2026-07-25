@@ -134,6 +134,20 @@ export const touchpoint = pgTable("touchpoint", {
  * Лог отправок. dedup_key не даёт задвоить касание/рассылку.
  * Для broadcast в ключ входит run_id (повторный ручной запуск — это новая отправка).
  */
+/**
+ * Дедуп служебных действий джоб (алерты операторам, разовые уведомления).
+ * Отдельно от message_log: там subscriber_id NOT NULL, а у алерта оператору
+ * подписчика нет. Раньше дедуп жил только в Redis — без него алерт повторялся
+ * каждые 5 минут, а при отсутствии Redis дедупа не было вовсе.
+ */
+export const jobDedup = pgTable("job_dedup", {
+  key: text("key").primaryKey(),
+  orgId: orgId(),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: createdAt(),
+}, (t) => [index("job_dedup_kind_idx").on(t.orgId, t.kind, t.createdAt)]);
+
 export const messageLog = pgTable("message_log", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: orgId(),

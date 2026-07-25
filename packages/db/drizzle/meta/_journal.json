@@ -15,6 +15,13 @@
       "when": 1784998600000,
       "tag": "0001_partial_unique_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785010000000,
+      "tag": "0002_job_dedup",
+      "breakpoints": true
     }
   ]
 }

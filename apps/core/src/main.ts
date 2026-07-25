@@ -3,14 +3,31 @@ import { NestFactory } from "@nestjs/core";
 import { Logger } from "@nestjs/common";
 import { AppModule } from "./app.module.js";
 import { loadConfig } from "./config.js";
+import { JobRegistry } from "./workers/job.registry.js";
+import { QueueService } from "./workers/queue.service.js";
+import { SchedulerService } from "./workers/scheduler.service.js";
 
 async function bootstrap() {
   const cfg = loadConfig();
   const log = new Logger("bootstrap");
 
   if (cfg.instanceType === "worker") {
-    // M0: воркер-режим — заглушка. Очереди BullMQ и cron-эмиттер (leader-lock) — M1.
-    log.log("worker mode: очереди появятся в M1 (BullMQ)");
+    // тот же контекст, что у api, но без HTTP: консьюмер очереди + cron-эмиттер на лидере
+    const ctx = await NestFactory.createApplicationContext(AppModule);
+    ctx.enableShutdownHooks();
+
+    const registry = ctx.get(JobRegistry);
+    const queue = ctx.get(QueueService);
+    const scheduler = ctx.get(SchedulerService);
+
+    const started = queue.startWorker((name) => registry.run(name));
+    if (!started) {
+      log.error("worker без Redis бессмысленен: задайте REDIS_URL");
+      await ctx.close();
+      return;
+    }
+    await scheduler.start();
+    log.log(`core worker запущен (org=${cfg.defaultOrgId})`);
     return;
   }
 

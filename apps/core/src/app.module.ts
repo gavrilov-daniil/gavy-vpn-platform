@@ -10,6 +10,7 @@ import { CrmModule } from "./crm/crm.module.js";
 import { BroadcastModule } from "./broadcast/broadcast.module.js";
 import { NodesModule } from "./nodes/nodes.module.js";
 import { SubscribersModule } from "./subscribers/subscribers.module.js";
+import { WorkersModule } from "./workers/workers.module.js";
 
 @Controller()
 class HealthController {
@@ -30,6 +31,7 @@ class HealthController {
     SupportModule,
     CrmModule,
     BroadcastModule,
+    WorkersModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ServiceTokenGuard }],

@@ -34,6 +34,28 @@ export class BotClient {
     return this.post("/bot/notify", input);
   }
 
+  /**
+   * Алерт операторам через второй (админский) бот: нода разъехалась, скоро продление сервера.
+   * Не бросает: алерт не имеет права ронять джобу, которая его вызвала.
+   */
+  async alert(text: string, opts: { silent?: boolean } = {}): Promise<{ ok: boolean; messageId: number | null }> {
+    try {
+      const res = await request<{ ok: boolean; messageId: number | null }>(`${this.cfg.botInternalUrl}/bot/alert`, {
+        method: "POST",
+        json: { text, silent: opts.silent ?? false },
+        headers: { "x-service-token": this.cfg.serviceToken },
+        retries: 0,
+        timeoutMs: 10_000,
+        provider: "bot",
+      });
+      return { ok: Boolean(res.body?.ok), messageId: res.body?.messageId ?? null };
+    } catch (err) {
+      const detail = err instanceof HttpError || err instanceof Error ? err.message : String(err);
+      this.log.warn(`алерт не доставлен: ${detail}`);
+      return { ok: false, messageId: null };
+    }
+  }
+
   private async post(path: string, input: BotSendInput): Promise<BotSendResult> {
     try {
       const res = await request<BotSendResult>(`${this.cfg.botInternalUrl}${path}`, {

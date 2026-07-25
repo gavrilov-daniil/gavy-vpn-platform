@@ -10,6 +10,6 @@ import { TouchpointService } from "./touchpoint.service.js";
   imports: [BotModule],
   controllers: [BroadcastAdminController],
   providers: [SegmentService, DispatchService, BroadcastService, TouchpointService],
-  exports: [SegmentService, BroadcastService, TouchpointService],
+  exports: [SegmentService, DispatchService, BroadcastService, TouchpointService],
 })
 export class BroadcastModule {}

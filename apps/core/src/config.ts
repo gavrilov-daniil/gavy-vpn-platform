@@ -18,6 +18,8 @@ export interface CoreConfig {
   serviceToken: string;
   /** Секрет node-agent↔core, заголовок x-agent-token. */
   agentToken: string;
+  /** Redis под очереди BullMQ. Пусто — очередей нет, джобы гоняются только руками. */
+  redisUrl: string;
 }
 
 export function loadConfig(): CoreConfig {
@@ -36,5 +38,6 @@ export function loadConfig(): CoreConfig {
     botInternalUrl: (process.env.BOT_INTERNAL_URL ?? "http://localhost:3300").replace(/\/+$/, ""),
     serviceToken: process.env.SERVICE_TOKEN ?? "",
     agentToken: process.env.AGENT_TOKEN ?? "",
+    redisUrl: process.env.REDIS_URL ?? "",
   };
 }

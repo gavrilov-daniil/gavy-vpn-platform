@@ -53,6 +53,17 @@ export class LedgerService {
     return { kind: "plan" as const, ...activation };
   }
 
+  /** Начисление реф-награды после антифрод-выдержки. Повтор гасится unique(idempotency_key). */
+  async creditReferral(tx: Tx, input: { subscriberId: string; amountKopeks: number; rewardId: string }) {
+    await this.append(tx, {
+      subscriberId: input.subscriberId,
+      amountKopeks: Math.abs(input.amountKopeks),
+      entryType: "referral",
+      description: "Реферальное вознаграждение",
+      idempotencyKey: `referral:${input.rewardId}`,
+    });
+  }
+
   /** Списание с баланса за тариф (покупка без внешнего платежа). */
   async chargeBalance(tx: Tx, input: { subscriberId: string; amountKopeks: number; description: string; refId: string }) {
     await this.append(tx, {
