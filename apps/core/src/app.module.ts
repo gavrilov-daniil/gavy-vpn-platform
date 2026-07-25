@@ -11,6 +11,7 @@ import { CrmModule } from "./crm/crm.module.js";
 import { BroadcastModule } from "./broadcast/broadcast.module.js";
 import { NodesModule } from "./nodes/nodes.module.js";
 import { SubscribersModule } from "./subscribers/subscribers.module.js";
+import { ImportModule } from "./import/import.module.js";
 import { WorkersModule } from "./workers/workers.module.js";
 
 @Controller()
@@ -29,6 +30,7 @@ class HealthController {
     PaymentsModule,
     NodesModule,
     SubscribersModule,
+    ImportModule,
     SupportModule,
     CrmModule,
     BroadcastModule,

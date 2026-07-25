@@ -24,6 +24,9 @@ export interface CoreConfig {
   agentToken: string;
   /** Redis под очереди BullMQ. Пусто — очередей нет, джобы гоняются только руками. */
   redisUrl: string;
+  /** Действующая панель Remnawave — читаем при миграции. Только чтение. */
+  remnawaveUrl: string;
+  remnawaveToken: string;
 }
 
 export function loadConfig(): CoreConfig {
@@ -45,5 +48,7 @@ export function loadConfig(): CoreConfig {
     adminToken: process.env.ADMIN_TOKEN ?? "",
     agentToken: process.env.AGENT_TOKEN ?? "",
     redisUrl: process.env.REDIS_URL ?? "",
+    remnawaveUrl: (process.env.REMNAWAVE_URL ?? "").replace(/\/+$/, ""),
+    remnawaveToken: process.env.REMNAWAVE_TOKEN ?? "",
   };
 }

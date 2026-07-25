@@ -24,16 +24,26 @@ import (
 // realitySettings.privateKey вместо самого ключа.
 const realityPrivateKeyPlaceholder = "__REALITY_PRIVATE_KEY__"
 
-// Manager drives Xray via systemd. It never talks to Xray's gRPC API in v1.
+// Manager drives Xray via systemd and reads its traffic counters over the local
+// gRPC API.
 type Manager struct {
 	systemdUnit string
 	// realityPrivateKeyPath держит приватник Reality внутри пакета: наружу отдаётся
 	// только публичная половина, и ключ не попадает ни в структуры, ни в логи.
 	realityPrivateKeyPath string
+	// statsClient == nil, когда адрес api-инбаунда не задан: тогда Stats честно
+	// возвращает ошибку, а не делает вид, что счётчиков нет.
+	statsClient *statsClient
 }
 
-func NewManager(systemdUnit, realityPrivateKeyPath string) *Manager {
-	return &Manager{systemdUnit: systemdUnit, realityPrivateKeyPath: realityPrivateKeyPath}
+// NewManager. apiAddr — адрес api-инбаунда Xray ("127.0.0.1:10085" в конфиге,
+// который собирает control-plane). Пустой адрес отключает чтение статистики.
+func NewManager(systemdUnit, realityPrivateKeyPath, apiAddr string) *Manager {
+	m := &Manager{systemdUnit: systemdUnit, realityPrivateKeyPath: realityPrivateKeyPath}
+	if apiAddr != "" {
+		m.statsClient = newStatsClient(apiAddr)
+	}
+	return m
 }
 
 // WriteConfig atomically writes the full Xray config. It validates JSON first so
@@ -136,12 +146,31 @@ func (m *Manager) Version(ctx context.Context) (string, error) {
 	return line, nil
 }
 
-// Stats is a TODO stub. v1 does not read traffic counters.
-// TODO(M2): dial Xray's gRPC StatsService and call QueryStats(reset=true), then
-// hand the returned counters to stats.Buffer.Append. reset=true is destructive
-// (see the stats package durability invariant) — persist before the next read.
+// Stats снимает счётчики трафика через локальный gRPC StatsService и ОБНУЛЯЕТ
+// их (QueryStats с reset=true), то есть возвращает дельту с прошлого вызова.
+// Пустой pattern — «все счётчики»: user>>>, inbound>>>, outbound>>>.
+//
+// Почему reset=true, а не накопительное чтение: без сброса Xray отдаёт
+// кумулятивные значения, которые обнуляются при каждом рестарте процесса. Тогда
+// дельту пришлось бы считать вычитанием и отличать «рестарт» от «переполнения»
+// эвристикой по убыванию значения — источник тихих ошибок учёта. Со сбросом
+// каждое чтение самодостаточно.
+//
+// ПРИНЯТЫЙ КОМПРОМИСС (потеря дельты при краше). Чтение деструктивно: между
+// ответом Xray и записью в durable-буфер дельта существует только в памяти
+// процесса. Падение агента ровно в этом окне теряет её безвозвратно —
+// восстанавливать нечего, счётчик в Xray уже нулевой. Мы это принимаем
+// осознанно: трафик здесь метрика (лимиты подписки, анти-абьюз), а не деньги, и
+// цена потери — недоучёт за один цикл. Атомарной альтернативы нет: в
+// StatsService не существует чтения с подтверждением (read → ack → reset).
+// Практический вывод для вызывающего — писать дельту на диск немедленно, до
+// любых сетевых операций (см. reconcile.collectStats и durability invariant в
+// пакете stats).
 func (m *Manager) Stats(ctx context.Context) ([]stats.Counter, error) {
-	return nil, errors.New("xray: stats not implemented in v1 (needs Xray gRPC StatsService)")
+	if m.statsClient == nil {
+		return nil, errors.New("xray: stats disabled (xray_api_addr is empty)")
+	}
+	return m.statsClient.QueryStats(ctx, "", true)
 }
 
 // RealityKeys is the PUBLIC half of the node's Reality identity, safe to report

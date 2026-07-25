@@ -50,6 +50,13 @@
       "when": 1785040010000,
       "tag": "0006_subscription_subscriber_uq",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785040020000,
+      "tag": "0007_drop_subscription_subscriber_uq",
+      "breakpoints": true
     }
   ]
 }

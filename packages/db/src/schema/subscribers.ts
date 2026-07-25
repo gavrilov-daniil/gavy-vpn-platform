@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, bigint, integer, boolean, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, bigint, integer, boolean, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createdAt, orgId, updatedAt } from "./_shared.js";
 
 // Конечный VPN-пользователь (обычно = Telegram-аккаунт).
@@ -57,9 +57,10 @@ export const subscription = pgTable("subscription", {
   updatedAt: updatedAt(),
 }, (t) => [
   uniqueIndex("subscription_org_short_uuid_uq").on(t.orgId, t.shortUuid),
-  // одна подписка на подписчика: иначе параллельные /start в двух инстансах core
-  // выдали бы клиенту два разных URL, из которых обновлялся бы только один
-  uniqueIndex("subscription_org_subscriber_uq").on(t.orgId, t.subscriberId),
+  // Уникальности по subscriber_id НЕТ намеренно: у клиента бывает вторая подписка
+  // (куплена для близких) — это подтвердилось данными действующей панели.
+  // Гонку параллельных /start гасит advisory-lock в ensureSubscription.
+  index("subscription_subscriber_idx").on(t.orgId, t.subscriberId),
 ]);
 
 // HWID-устройства. Идемпотентность device-limit — на unique index, не check-then-act (GHSA-паттерн).
