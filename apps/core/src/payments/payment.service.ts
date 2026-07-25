@@ -7,6 +7,7 @@ import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { MerchantService } from "./merchant.service.js";
 import { LedgerService } from "./ledger.service.js";
+import { AttributionService } from "../crm/attribution.service.js";
 
 export interface CreatePaymentInput {
   subscriberId: string;
@@ -34,6 +35,7 @@ export class PaymentService {
     @Inject(DB) private readonly db: Database,
     private readonly merchants: MerchantService,
     private readonly ledger: LedgerService,
+    private readonly attribution: AttributionService,
   ) {}
 
   async createPayment(input: CreatePaymentInput) {
@@ -151,6 +153,22 @@ export class PaymentService {
    * (в проде из-за расхождения этого списка между провайдерами терялись оплаты).
    */
   private async markPaidAndFulfill(paymentId: string, providerRef: string | undefined, raw: unknown) {
+    const result = await this.fulfillInTransaction(paymentId, providerRef, raw);
+
+    // Атрибуция считается ПОСЛЕ коммита: у сервиса своё подключение к БД, внутри чужой
+    // транзакции он не увидит незакоммиченный платёж. Её падение не должно откатывать оплату,
+    // поэтому ошибка только логируется — деньги важнее статистики.
+    if (!result.alreadyProcessed) {
+      try {
+        await this.attribution.onPaymentPaid(paymentId);
+      } catch (err) {
+        this.log.error(`атрибуция платежа ${paymentId} не записана: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return result;
+  }
+
+  private async fulfillInTransaction(paymentId: string, providerRef: string | undefined, raw: unknown) {
     return this.db.transaction(async (tx) => {
       const claimed = await tx
         .update(schema.payment)

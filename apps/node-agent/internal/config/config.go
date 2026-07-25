@@ -176,8 +176,7 @@ func (c *Config) validate() error {
 	}
 
 	switch c.RealityKeypairMode {
-	case KeypairModeGenerate:
-	case KeypairModeImport:
+	case KeypairModeGenerate, KeypairModeImport:
 	default:
 		return fmt.Errorf("invalid reality_keypair_mode %q (want generate|import)", c.RealityKeypairMode)
 	}

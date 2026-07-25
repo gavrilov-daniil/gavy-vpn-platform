@@ -1,4 +1,6 @@
 import { Controller, Get, Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
+import { ServiceTokenGuard } from "./common/service-token.guard.js";
 import { DbModule } from "./db/db.module.js";
 import { SubscriptionModule } from "./subscription/subscription.module.js";
 import { AdminModule } from "./admin/admin.module.js";
@@ -30,5 +32,6 @@ class HealthController {
     BroadcastModule,
   ],
   controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: ServiceTokenGuard }],
 })
 export class AppModule {}

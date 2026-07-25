@@ -50,16 +50,13 @@ export class SupportController {
     });
     if (message.deduped) return { messageId: message.messageId, deduped: true, delivered: false };
 
-    const sent = await this.bot.sendSupportReply({
-      telegramId: message.telegramUserId,
-      text: message.text,
-    });
+    const sent = await this.bot.notify({ telegramId: message.telegramUserId, text: message.text });
     if (sent.ok) {
-      await this.support.markDelivered(message.messageId, sent.telegramMessageId);
+      await this.support.markDelivered(message.messageId, sent.messageId);
       return { messageId: message.messageId, deduped: false, delivered: true };
     }
 
-    await this.support.markFailed(message.messageId, sent.error ?? sent.reason);
+    await this.support.markFailed(message.messageId, sent.detail ?? sent.reason);
     return { messageId: message.messageId, deduped: false, delivered: false, reason: sent.reason };
   }
 

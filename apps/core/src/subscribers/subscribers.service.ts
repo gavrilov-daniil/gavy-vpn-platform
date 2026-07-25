@@ -5,6 +5,7 @@ import { schema, type Database } from "@vpn/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { LedgerService } from "../payments/ledger.service.js";
+import { AttributionService } from "../crm/attribution.service.js";
 
 /** Неугадываемый идентификатор подписки в публичном URL. */
 function generateShortUuid(): string {
@@ -19,6 +20,7 @@ export class SubscribersService {
   constructor(
     @Inject(DB) private readonly db: Database,
     private readonly ledger: LedgerService,
+    private readonly attribution: AttributionService,
   ) {}
 
   /**
@@ -30,6 +32,8 @@ export class SubscribersService {
     telegramId: number;
     username?: string;
     languageCode?: string;
+    /** Сырой payload из t.me/bot?start=... — код кампании резолвится здесь. */
+    startPayload?: string;
     campaignLinkId?: string;
     referrerSubscriberId?: string;
   }) {
@@ -44,6 +48,11 @@ export class SubscribersService {
       )
       .limit(1);
 
+    // код кампании из deep-link; невалидный payload не должен ломать регистрацию — просто органика
+    const link = input.campaignLinkId
+      ? { id: input.campaignLinkId }
+      : await this.attribution.resolveStartPayload(input.startPayload);
+
     if (existing) {
       if (input.username && input.username !== existing.username) {
         await this.db
@@ -51,6 +60,8 @@ export class SubscribersService {
           .set({ username: input.username })
           .where(eq(schema.subscriber.id, existing.id));
       }
+      // повторный приход по ссылке: событие пишется, но first-touch не переписывается
+      if (link) await this.attribution.onRegistration(existing.id, link.id);
       return { subscriber: existing, created: false };
     }
 
@@ -61,7 +72,9 @@ export class SubscribersService {
         telegramId: input.telegramId,
         username: input.username,
         languageCode: input.languageCode,
-        campaignLinkId: input.campaignLinkId,
+        // campaign_link_id НЕ пишем здесь: first-touch claim делает AttributionService
+        // условным UPDATE по IS NULL. Если заполнить сразу, claim не сработает
+        // и регистрация будет засчитана как повторный приход.
         referrerSubscriberId: input.referrerSubscriberId,
         status: "active",
       })
@@ -84,6 +97,7 @@ export class SubscribersService {
     }
 
     await this.ensureSubscription(created.id);
+    if (link) await this.attribution.onRegistration(created.id, link.id);
     return { subscriber: created, created: true };
   }
 

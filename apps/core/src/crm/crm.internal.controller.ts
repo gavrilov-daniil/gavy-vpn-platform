@@ -3,14 +3,14 @@ import { AttributionService } from "./attribution.service.js";
 import { EventsService } from "./events.service.js";
 
 /** Точки входа для бота: события воронки и атрибуция по deep-link. */
-@Controller("internal/crm")
+@Controller("internal")
 export class CrmInternalController {
   constructor(
     private readonly events: EventsService,
     private readonly attribution: AttributionService,
   ) {}
 
-  @Post("events")
+  @Post("bot-events/track")
   track(
     @Body()
     body: {
@@ -26,7 +26,7 @@ export class CrmInternalController {
   }
 
   /** Бот шлёт сырой start-payload; невалидный код здесь не ошибка, а органика. */
-  @Post("attribution/registration")
+  @Post("crm/attribution/registration")
   async registration(@Body() body: { subscriberId: string; startPayload?: string }) {
     if (!body.subscriberId) throw new BadRequestException("нужен subscriberId");
     const link = await this.attribution.resolveStartPayload(body.startPayload);
@@ -35,7 +35,7 @@ export class CrmInternalController {
     return { attributed: true as const, code: link.code, ...result };
   }
 
-  @Post("attribution/payment")
+  @Post("crm/attribution/payment")
   payment(@Body() body: { paymentId: string }) {
     if (!body.paymentId) throw new BadRequestException("нужен paymentId");
     return this.attribution.onPaymentPaid(body.paymentId);
