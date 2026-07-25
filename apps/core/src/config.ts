@@ -12,6 +12,12 @@ export interface CoreConfig {
   publicApiUrl: string;
   paymentSuccessUrl: string;
   paymentFailUrl: string;
+  /** Внутренний URL бота — через него уходят рассылки и ответы поддержки в Telegram. */
+  botInternalUrl: string;
+  /** Общий секрет core↔бот, заголовок x-service-token. */
+  serviceToken: string;
+  /** Секрет node-agent↔core, заголовок x-agent-token. */
+  agentToken: string;
 }
 
 export function loadConfig(): CoreConfig {
@@ -27,5 +33,8 @@ export function loadConfig(): CoreConfig {
     publicApiUrl: (process.env.PUBLIC_API_URL ?? "http://localhost:3100").replace(/\/+$/, ""),
     paymentSuccessUrl: process.env.PAYMENT_SUCCESS_URL ?? "",
     paymentFailUrl: process.env.PAYMENT_FAIL_URL ?? "",
+    botInternalUrl: (process.env.BOT_INTERNAL_URL ?? "http://localhost:3300").replace(/\/+$/, ""),
+    serviceToken: process.env.SERVICE_TOKEN ?? "",
+    agentToken: process.env.AGENT_TOKEN ?? "",
   };
 }

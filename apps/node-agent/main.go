@@ -50,6 +50,8 @@ func run(configPath string, logger *slog.Logger) error {
 
 	cp, err := controlplane.New(controlplane.Options{
 		BaseURL:         cfg.ControlPlaneURL,
+		NodeID:          cfg.NodeID,
+		AgentToken:      cfg.AgentToken,
 		ClientCertPath:  cfg.ClientCertPath,
 		ClientKeyPath:   cfg.ClientKeyPath,
 		CPPublicKeyPath: cfg.CPPublicKeyPath,
@@ -58,11 +60,11 @@ func run(configPath string, logger *slog.Logger) error {
 		return fmt.Errorf("init control-plane client: %w", err)
 	}
 
-	xr := xray.NewManager(cfg.XraySystemdUnit)
+	xr := xray.NewManager(cfg.XraySystemdUnit, cfg.RealityPrivateKeyPath)
 
 	// Ensure the Reality keypair before anything else. Idempotent, and in import
 	// mode it refuses to run when the migrated key is missing (never rotates pbk).
-	keys, err := xr.EnsureRealityKeypair(cfg.RealityKeypairMode, cfg.RealityPrivateKeyPath)
+	keys, err := xr.EnsureRealityKeypair(cfg.RealityKeypairMode)
 	if err != nil {
 		return fmt.Errorf("ensure reality keypair: %w", err)
 	}
@@ -70,10 +72,6 @@ func run(configPath string, logger *slog.Logger) error {
 		"mode", cfg.RealityKeypairMode,
 		"public_key", keys.PublicKeyBase64,
 		"short_ids", keys.ShortIDs)
-
-	if err := maybeRegister(ctx, cfg, cp, keys, logger); err != nil {
-		return fmt.Errorf("bootstrap register: %w", err)
-	}
 
 	sb, err := stats.New(filepath.Join(cfg.StateDir, "stats-buffer.json"), agentEpochOrFallback(cfg))
 	if err != nil {
@@ -83,6 +81,7 @@ func run(configPath string, logger *slog.Logger) error {
 	rec := reconcile.New(cfg, cp, xr, sb, logger, version)
 	logger.Info("node-agent started",
 		"version", version,
+		"node_id", cfg.NodeID,
 		"control_plane", cfg.ControlPlaneURL,
 		"pull_interval", cfg.PullInterval.String())
 
@@ -90,35 +89,6 @@ func run(configPath string, logger *slog.Logger) error {
 		return err
 	}
 	logger.Info("node-agent stopped")
-	return nil
-}
-
-// maybeRegister runs the one-time bootstrap handshake if a bootstrap token file
-// is present. On an already-registered node (token consumed) it is a no-op.
-func maybeRegister(ctx context.Context, cfg *config.Config, cp *controlplane.Client, keys xray.RealityKeys, logger *slog.Logger) error {
-	if cfg.BootstrapTokenPath == "" {
-		return nil
-	}
-	raw, err := os.ReadFile(cfg.BootstrapTokenPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil // token already consumed -> already bootstrapped
-		}
-		return fmt.Errorf("read bootstrap token: %w", err)
-	}
-	token := strings.TrimSpace(string(raw))
-	if token == "" {
-		return nil
-	}
-
-	res, err := cp.Register(ctx, token, keys.PublicKeyBase64, keys.ShortIDs)
-	if err != nil {
-		return err
-	}
-	logger.Info("registered with control plane", "node_id", res.NodeID, "agent_epoch", res.AgentEpoch)
-
-	// TODO: persist res.NodeID / res.AgentEpoch into local state and delete the
-	// one-time bootstrap token file so it cannot be replayed.
 	return nil
 }
 

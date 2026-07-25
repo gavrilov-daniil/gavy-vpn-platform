@@ -12,3 +12,15 @@ export {
   buildDns,
   DEFAULT_PROBE_URL,
 } from "./split-routing.js";
+export {
+  buildNodeConfig,
+  configHash,
+  canonicalJson,
+  deterministicUuid,
+  type NodeRole,
+  type NodeConfigInput,
+  type NodeInbound,
+  type NodeUser,
+  type CascadeOutbound,
+  type RealityIdentity,
+} from "./node-config.js";

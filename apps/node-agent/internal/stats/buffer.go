@@ -33,8 +33,13 @@ type Counter struct {
 // Entry is one durable report unit: the counters read in a single
 // QueryStats(reset=true) call, tagged with a monotonic report_id so the control
 // plane can dedup on redelivery.
+//
+// WindowStart — момент предыдущего чтения счётчиков. Дельта относится к окну
+// [WindowStart, CollectedAt], и control-plane принимает её именно окном: вторым
+// барьером дедупа у него служит UNIQUE(node, subject, window_start).
 type Entry struct {
 	ReportID    string    `json:"report_id"`
+	WindowStart time.Time `json:"window_start"`
 	CollectedAt time.Time `json:"collected_at"`
 	Counters    []Counter `json:"counters"`
 }
@@ -79,16 +84,19 @@ func New(path, agentEpoch string) (*Buffer, error) {
 }
 
 // Append assigns the next report_id, durably persists the entry, and returns it.
+// windowStart is when the previous destructive read happened — it bounds the
+// window the appended deltas belong to.
 // On persist failure the in-memory state is rolled back so the caller can retry;
 // note the caller must NOT have discarded the source counters, since the Xray
 // reset already happened.
-func (b *Buffer) Append(counters []Counter) (Entry, error) {
+func (b *Buffer) Append(windowStart time.Time, counters []Counter) (Entry, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	b.seq++
 	e := Entry{
 		ReportID:    fmt.Sprintf("%s:%d", b.agentEpoch, b.seq),
+		WindowStart: windowStart.UTC(),
 		CollectedAt: time.Now().UTC(),
 		Counters:    counters,
 	}

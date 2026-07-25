@@ -101,6 +101,9 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	if err := r.report(ctx, applied); err != nil {
 		return fmt.Errorf("report: %w", err)
 	}
+	if err := r.shipStats(ctx); err != nil {
+		return fmt.Errorf("ship stats: %w", err)
+	}
 	return nil
 }
 
@@ -127,27 +130,33 @@ func (r *Reconciler) report(ctx context.Context, applied appliedState) error {
 		xrayVer = ""
 	}
 
-	// TODO(M2): read counters via xray.Stats (QueryStats reset=true) and
-	// r.stats.Append them here before reporting. For now we only ship whatever is
-	// already buffered (normally nothing in v1).
-	pending := r.stats.Pending()
-
-	ack, err := r.cp.ReportState(ctx, controlplane.ObservedState{
-		NodeID:         r.cfg.NodeID,
-		AgentEpoch:     r.cfg.AgentEpoch,
-		AgentVersion:   r.agentVersion,
-		AppliedHash:    applied.ConfigHash,
-		AppliedVersion: applied.Version,
-		XrayVersion:    xrayVer,
-		Sys:            collectSysStats(),
-		Stats:          pending,
+	return r.cp.ReportState(ctx, controlplane.ObservedState{
+		AppliedConfigHash: applied.ConfigHash,
+		AgentVersion:      r.agentVersion,
+		XrayVersion:       xrayVer,
+		Sys:               collectSysStats(),
 	})
-	if err != nil {
-		return err
-	}
-	if ack.AckedReportID != "" {
-		if err := r.stats.MarkShipped(ack.AckedReportID); err != nil {
-			r.log.Warn("reconcile: mark shipped failed", "report_id", ack.AckedReportID, "err", err)
+}
+
+// shipStats ships the buffered stats batches one by one — each carries its own
+// report_id, which is what the control plane dedups on.
+//
+// TODO(M2): read counters via xray.Stats (QueryStats reset=true) and
+// r.stats.Append them before shipping. For now we only ship whatever is already
+// buffered (normally nothing in v1).
+func (r *Reconciler) shipStats(ctx context.Context) error {
+	for _, entry := range r.stats.Pending() {
+		accepted, err := r.cp.ShipStats(ctx, controlplane.BatchFromEntry(entry))
+		if err != nil {
+			return err
+		}
+		// accepted=false — батч уже принят control-plane раньше. Ретрай даст тот же
+		// ответ, поэтому дропаем буфер точно так же, как при accepted=true.
+		if !accepted {
+			r.log.Warn("reconcile: stats batch already accepted, dropping", "report_id", entry.ReportID)
+		}
+		if err := r.stats.MarkShipped(entry.ReportID); err != nil {
+			return fmt.Errorf("mark shipped %s: %w", entry.ReportID, err)
 		}
 	}
 	return nil

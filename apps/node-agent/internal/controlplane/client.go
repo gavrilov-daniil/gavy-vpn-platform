@@ -1,8 +1,11 @@
-// Package controlplane is the dial-out (PULL) mTLS client to the control plane.
+// Package controlplane is the dial-out (PULL) client to the control plane.
 //
 // The agent always initiates the connection; the control plane never dials the
 // node. This means a node only needs outbound 443 — no inbound management port,
 // no public API surface on the node itself.
+//
+// Authentication is a shared secret in the x-agent-token header. mTLS is
+// supported but optional (see New).
 package controlplane
 
 import (
@@ -19,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -35,12 +39,14 @@ type User struct {
 	Level int    `json:"level"`
 }
 
-// DesiredState is the full, authoritative declaration for the node.
+// DesiredState is the full, authoritative declaration for the node. Wire format
+// is the control plane's camelCase JSON.
 type DesiredState struct {
-	Version    int64           `json:"version"`
-	ConfigHash string          `json:"config_hash"` // sha256 of canonical config JSON
-	Config     json.RawMessage `json:"config"`      // the entire Xray config for this node
-	Users      []User          `json:"users"`
+	Version     int64           `json:"version"`
+	ConfigHash  string          `json:"configHash"` // sha256 of canonical config JSON
+	Config      json.RawMessage `json:"config"`     // the entire Xray config for this node
+	Users       []User          `json:"users"`
+	GeneratedAt string          `json:"generatedAt"`
 }
 
 // signedEnvelope wraps the desired state. The signature covers Payload's exact
@@ -53,67 +59,87 @@ type signedEnvelope struct {
 
 type SysStats struct {
 	Load1      float64 `json:"load1"`
-	UptimeSec  float64 `json:"uptime_sec"`
-	MemTotalKB uint64  `json:"mem_total_kb"`
-	MemAvailKB uint64  `json:"mem_avail_kb"`
+	UptimeSec  float64 `json:"uptimeSec"`
+	MemTotalKB uint64  `json:"memTotalKb"`
+	MemAvailKB uint64  `json:"memAvailKb"`
 }
 
 // ObservedState is what the agent reports back each cycle (heartbeat + result).
 type ObservedState struct {
-	NodeID         string
-	AgentEpoch     string
-	AgentVersion   string
-	AppliedHash    string
-	AppliedVersion int64
-	XrayVersion    string
-	Sys            SysStats
-	Stats          []stats.Entry
+	AppliedConfigHash string
+	AgentVersion      string
+	XrayVersion       string
+	Sys               SysStats
 }
 
-// ReportAck tells the agent which stats report_id the control plane durably
-// accepted; the buffer drops everything up to it.
-type ReportAck struct {
-	AckedReportID string `json:"acked_report_id"`
+// StatsDelta is one traffic delta in the control plane's format.
+type StatsDelta struct {
+	SubjectType string `json:"subjectType"` // user | inbound | outbound
+	SubjectKey  string `json:"subjectKey"`
+	UpDelta     int64  `json:"upDelta"`
+	DownDelta   int64  `json:"downDelta"`
+	WindowStart string `json:"windowStart"` // ISO-8601
+	WindowEnd   string `json:"windowEnd"`
 }
 
-// RegisterResult is returned by the one-time bootstrap handshake.
-type RegisterResult struct {
-	NodeID     string `json:"node_id"`
-	AgentEpoch string `json:"agent_epoch"`
-	// TODO: the control plane issues the mTLS client certificate here in exchange
-	// for the one-time bootstrap token; the agent persists it and uses it for all
-	// subsequent (mTLS) calls.
+// StatsBatch is the body of POST /stats. ReportID is monotonic
+// ("<agent_epoch>:<seq>") and is what the control plane dedups redelivery on.
+type StatsBatch struct {
+	ReportID string       `json:"reportId"`
+	Deltas   []StatsDelta `json:"deltas"`
+}
+
+type statsAck struct {
+	Accepted bool `json:"accepted"`
+	Applied  int  `json:"applied"`
 }
 
 type Client struct {
 	baseURL string
+	nodeID  string
+	token   string
 	httpc   *http.Client
 	cpPub   *rsa.PublicKey
 }
 
 type Options struct {
 	BaseURL         string
+	NodeID          string
+	AgentToken      string
 	ClientCertPath  string
 	ClientKeyPath   string
 	CPPublicKeyPath string
 }
 
+// New builds the client. mTLS и проверка подписи включаются по наличию файлов в
+// конфиге: без них агент работает по обычному HTTPS с токеном в заголовке —
+// это состояние control-plane на сегодня.
 func New(opts Options) (*Client, error) {
-	cert, err := tls.LoadX509KeyPair(opts.ClientCertPath, opts.ClientKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("controlplane: load client cert: %w", err)
+	// TLS 1.2 как нижняя граница: агент ходит через произвольный reverse-proxy.
+	// Там, где настроен mTLS, поднимаем до 1.3 — этот путь целиком наш.
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if opts.ClientCertPath != "" && opts.ClientKeyPath != "" {
+		cert, err := tls.LoadX509KeyPair(opts.ClientCertPath, opts.ClientKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("controlplane: load client cert: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+		tlsCfg.MinVersion = tls.VersionTLS13
 	}
-	pub, err := loadRSAPublicKey(opts.CPPublicKeyPath)
-	if err != nil {
-		return nil, err
+
+	var pub *rsa.PublicKey
+	if opts.CPPublicKeyPath != "" {
+		p, err := loadRSAPublicKey(opts.CPPublicKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		pub = p
 	}
+
 	httpc := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				MinVersion:   tls.VersionTLS13,
-			},
+			TLSClientConfig:     tlsCfg,
 			MaxIdleConns:        4,
 			IdleConnTimeout:     90 * time.Second,
 			TLSHandshakeTimeout: 10 * time.Second,
@@ -121,6 +147,8 @@ func New(opts Options) (*Client, error) {
 	}
 	return &Client{
 		baseURL: strings.TrimRight(opts.BaseURL, "/"),
+		nodeID:  opts.NodeID,
+		token:   opts.AgentToken,
 		httpc:   httpc,
 		cpPub:   pub,
 	}, nil
@@ -142,95 +170,169 @@ func VerifySignature(payload []byte, signatureB64 string, pub *rsa.PublicKey) er
 	return nil
 }
 
-// PullDesiredState fetches, verifies, and decodes the signed desired state.
+// PullDesiredState fetches, verifies (when signed) and decodes the desired state.
 func (c *Client) PullDesiredState(ctx context.Context) (*DesiredState, error) {
-	body, err := c.do(ctx, http.MethodGet, "/v1/desired-state", nil, "")
+	body, err := c.do(ctx, http.MethodGet, c.nodePath("/desired-state"), nil)
 	if err != nil {
 		return nil, err
 	}
-	var env signedEnvelope
-	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, fmt.Errorf("controlplane: decode envelope: %w", err)
-	}
-	if err := VerifySignature(env.Payload, env.Signature, c.cpPub); err != nil {
+	payload, err := c.unwrap(body)
+	if err != nil {
 		return nil, err
 	}
 	var ds DesiredState
-	if err := json.Unmarshal(env.Payload, &ds); err != nil {
+	if err := json.Unmarshal(payload, &ds); err != nil {
 		return nil, fmt.Errorf("controlplane: decode desired state: %w", err)
+	}
+	if ds.ConfigHash == "" || len(ds.Config) == 0 {
+		return nil, fmt.Errorf("controlplane: desired state without configHash/config")
 	}
 	return &ds, nil
 }
 
-// ReportState reports observed state (applied hash, versions, sys stats) plus any
-// pending stats entries, and returns the ack.
-func (c *Client) ReportState(ctx context.Context, obs ObservedState) (*ReportAck, error) {
-	payload, err := json.Marshal(reportRequest{
-		NodeID:         obs.NodeID,
-		AgentEpoch:     obs.AgentEpoch,
-		AgentVersion:   obs.AgentVersion,
-		AppliedHash:    obs.AppliedHash,
-		AppliedVersion: obs.AppliedVersion,
-		XrayVersion:    obs.XrayVersion,
-		Sys:            obs.Sys,
-		Stats:          obs.Stats,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("controlplane: encode report: %w", err)
-	}
-	body, err := c.do(ctx, http.MethodPost, "/v1/report", payload, "")
-	if err != nil {
-		return nil, err
-	}
-	var ack ReportAck
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &ack); err != nil {
-			return nil, fmt.Errorf("controlplane: decode report ack: %w", err)
+// unwrap возвращает байты desired-state и попутно решает, проверять ли подпись.
+//
+// Подпись — root of trust агента, но control-plane её пока не ставит и отдаёт
+// «голый» JSON. Отсюда правило, защищающее от даунгрейда:
+//   - пришёл конверт {payload, signature} — подпись проверяется всегда;
+//   - пришёл голый JSON — принимаем ТОЛЬКО если cp_public_key_path пуст, то есть
+//     оператор осознанно не включал проверку;
+//   - ключ задан, а подписи нет — ошибка. Иначе тот, кто подменил ответ, снимал
+//     бы проверку простым удалением поля signature;
+//   - конверт есть, а ключа нет — тоже ошибка: проверить нечем, а молча съесть
+//     неподтверждённый конфиг хуже, чем громко встать (агент при этом продолжает
+//     крутить последний применённый конфиг).
+func (c *Client) unwrap(body []byte) (json.RawMessage, error) {
+	var env signedEnvelope
+	signed := json.Unmarshal(body, &env) == nil && len(env.Payload) > 0 && env.Signature != ""
+
+	if signed {
+		if c.cpPub == nil {
+			return nil, fmt.Errorf("controlplane: desired state is signed but cp_public_key_path is not configured")
 		}
+		if err := VerifySignature(env.Payload, env.Signature, c.cpPub); err != nil {
+			return nil, err
+		}
+		return env.Payload, nil
 	}
-	return &ack, nil
+	if c.cpPub != nil {
+		return nil, fmt.Errorf("controlplane: cp_public_key_path is configured but desired state came unsigned")
+	}
+	return body, nil
 }
 
-// Register performs the one-time bootstrap: it authenticates with a single-use
-// token (not mTLS — the client cert may not exist yet) and hands the control
-// plane the Reality PUBLIC key + shortIDs so it can build client-facing configs
-// without ever seeing the private key.
-func (c *Client) Register(ctx context.Context, bootstrapToken, realityPublicKey string, shortIDs []string) (*RegisterResult, error) {
-	payload, err := json.Marshal(registerRequest{
-		RealityPublicKey: realityPublicKey,
-		RealityShortIDs:  shortIDs,
+// ReportState reports observed state (applied hash, versions, sys stats).
+func (c *Client) ReportState(ctx context.Context, obs ObservedState) error {
+	payload, err := json.Marshal(reportRequest{
+		AppliedConfigHash: obs.AppliedConfigHash,
+		AgentVersion:      obs.AgentVersion,
+		XrayVersion:       obs.XrayVersion,
+		SysStats:          obs.Sys,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("controlplane: encode register: %w", err)
+		return fmt.Errorf("controlplane: encode report: %w", err)
 	}
-	body, err := c.do(ctx, http.MethodPost, "/v1/register", payload, "Bearer "+bootstrapToken)
+	if _, err := c.do(ctx, http.MethodPost, c.nodePath("/report"), payload); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ShipStats ships one stats batch and reports whether the control plane took it.
+//
+// accepted=false — не ошибка: control-plane уже принимал этот report_id раньше.
+// Батч надо ДРОПНУТЬ, а не ретраить — повтор даст тот же ответ вечно.
+func (c *Client) ShipStats(ctx context.Context, batch StatsBatch) (bool, error) {
+	if batch.Deltas == nil {
+		batch.Deltas = []StatsDelta{}
+	}
+	payload, err := json.Marshal(batch)
 	if err != nil {
-		return nil, err
+		return false, fmt.Errorf("controlplane: encode stats batch: %w", err)
 	}
-	var res RegisterResult
-	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("controlplane: decode register result: %w", err)
+	body, err := c.do(ctx, http.MethodPost, c.nodePath("/stats"), payload)
+	if err != nil {
+		return false, err
 	}
-	return &res, nil
+	var ack statsAck
+	if err := json.Unmarshal(body, &ack); err != nil {
+		return false, fmt.Errorf("controlplane: decode stats ack: %w", err)
+	}
+	return ack.Accepted, nil
+}
+
+// BatchFromEntry converts one durable buffer entry into the wire batch: Xray
+// counter names ("user>>>alice@example.com>>>traffic>>>uplink") collapse into one
+// delta per subject, carrying the report_id the control plane dedups on.
+func BatchFromEntry(e stats.Entry) StatsBatch {
+	windowStart := e.WindowStart.UTC().Format(time.RFC3339Nano)
+	windowEnd := e.CollectedAt.UTC().Format(time.RFC3339Nano)
+
+	type subject struct{ typ, key string }
+	agg := make(map[subject]*StatsDelta, len(e.Counters))
+	order := make([]subject, 0, len(e.Counters))
+
+	for _, c := range e.Counters {
+		typ, key, direction, ok := parseCounterName(c.Name)
+		if !ok {
+			continue
+		}
+		s := subject{typ, key}
+		d, seen := agg[s]
+		if !seen {
+			d = &StatsDelta{
+				SubjectType: typ,
+				SubjectKey:  key,
+				WindowStart: windowStart,
+				WindowEnd:   windowEnd,
+			}
+			agg[s] = d
+			order = append(order, s)
+		}
+		if direction == "uplink" {
+			d.UpDelta += c.Value
+		} else {
+			d.DownDelta += c.Value
+		}
+	}
+
+	deltas := make([]StatsDelta, 0, len(order))
+	for _, s := range order {
+		deltas = append(deltas, *agg[s])
+	}
+	return StatsBatch{ReportID: e.ReportID, Deltas: deltas}
+}
+
+// parseCounterName splits an Xray stats counter name into its parts. Anything
+// that does not look like "<subject>>>><key>>>>traffic>>><direction>" is skipped.
+func parseCounterName(name string) (subjectType, subjectKey, direction string, ok bool) {
+	parts := strings.Split(name, ">>>")
+	if len(parts) != 4 || parts[2] != "traffic" {
+		return "", "", "", false
+	}
+	switch parts[0] {
+	case "user", "inbound", "outbound":
+	default:
+		return "", "", "", false
+	}
+	if parts[3] != "uplink" && parts[3] != "downlink" {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[3], true
 }
 
 type reportRequest struct {
-	NodeID         string        `json:"node_id"`
-	AgentEpoch     string        `json:"agent_epoch"`
-	AgentVersion   string        `json:"agent_version"`
-	AppliedHash    string        `json:"applied_hash"`
-	AppliedVersion int64         `json:"applied_version"`
-	XrayVersion    string        `json:"xray_version"`
-	Sys            SysStats      `json:"sys"`
-	Stats          []stats.Entry `json:"stats"`
+	AppliedConfigHash string   `json:"appliedConfigHash"`
+	AgentVersion      string   `json:"agentVersion"`
+	XrayVersion       string   `json:"xrayVersion"`
+	SysStats          SysStats `json:"sysStats"`
 }
 
-type registerRequest struct {
-	RealityPublicKey string   `json:"reality_public_key"`
-	RealityShortIDs  []string `json:"reality_short_ids"`
+func (c *Client) nodePath(suffix string) string {
+	return "/internal/agent/nodes/" + url.PathEscape(c.nodeID) + suffix
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body []byte, authorization string) ([]byte, error) {
+func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
@@ -243,9 +345,7 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, autho
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if authorization != "" {
-		req.Header.Set("Authorization", authorization)
-	}
+	req.Header.Set("x-agent-token", c.token)
 
 	resp, err := c.httpc.Do(req)
 	if err != nil {

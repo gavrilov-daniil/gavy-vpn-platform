@@ -20,13 +20,20 @@ import (
 	"vpn-platform/node-agent/internal/stats"
 )
 
+// realityPrivateKeyPlaceholder — то, что control-plane кладёт в
+// realitySettings.privateKey вместо самого ключа.
+const realityPrivateKeyPlaceholder = "__REALITY_PRIVATE_KEY__"
+
 // Manager drives Xray via systemd. It never talks to Xray's gRPC API in v1.
 type Manager struct {
 	systemdUnit string
+	// realityPrivateKeyPath держит приватник Reality внутри пакета: наружу отдаётся
+	// только публичная половина, и ключ не попадает ни в структуры, ни в логи.
+	realityPrivateKeyPath string
 }
 
-func NewManager(systemdUnit string) *Manager {
-	return &Manager{systemdUnit: systemdUnit}
+func NewManager(systemdUnit, realityPrivateKeyPath string) *Manager {
+	return &Manager{systemdUnit: systemdUnit, realityPrivateKeyPath: realityPrivateKeyPath}
 }
 
 // WriteConfig atomically writes the full Xray config. It validates JSON first so
@@ -36,10 +43,70 @@ func (m *Manager) WriteConfig(path string, cfg []byte) error {
 	if !json.Valid(cfg) {
 		return errors.New("xray: refusing to write invalid JSON config")
 	}
-	if err := writeFileAtomic(path, cfg, 0o600); err != nil {
+	withKey, err := m.injectRealityPrivateKey(cfg)
+	if err != nil {
+		return err
+	}
+	if err := writeFileAtomic(path, withKey, 0o600); err != nil {
 		return fmt.Errorf("xray: write config %s: %w", path, err)
 	}
 	return nil
+}
+
+// injectRealityPrivateKey подставляет локальный приватник Reality вместо
+// плейсхолдера, пришедшего из desired-state.
+//
+// Почему так: приватник Reality никогда не покидает ноду — control-plane его не
+// знает и знать не должен, поэтому в конфиге приходит строка-плейсхолдер. Без
+// подстановки Xray просто не стартует. Ключ берётся из локального файла, а при
+// миграции существующей ноды он ИМПОРТИРУЕТСЯ, а не генерируется: смена ключа
+// сменила бы pbk в строке подключения и порвала всех уже подключённых клиентов.
+//
+// Замена — на уровне байт, а не через unmarshal/marshal: конфиг доезжает до
+// файла ровно таким, каким его собрал control-plane (числа, порядок ключей,
+// пробелы не переписываются).
+func (m *Manager) injectRealityPrivateKey(cfg []byte) ([]byte, error) {
+	token := []byte(`"` + realityPrivateKeyPlaceholder + `"`)
+	if !bytes.Contains(cfg, token) {
+		return cfg, nil // на ноде может не быть reality-инбаунда — подставлять нечего
+	}
+	key, err := m.readRealityPrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	return bytes.ReplaceAll(cfg, token, []byte(`"`+key+`"`)), nil
+}
+
+func (m *Manager) readRealityPrivateKey() (string, error) {
+	if m.realityPrivateKeyPath == "" {
+		return "", errors.New("xray: reality private key path is empty")
+	}
+	raw, err := os.ReadFile(m.realityPrivateKeyPath)
+	if err != nil {
+		return "", fmt.Errorf("xray: read reality private key: %w", err)
+	}
+	key := strings.TrimSpace(string(raw))
+	// Ключ уходит внутрь JSON-строки как есть, поэтому формат проверяем до
+	// подстановки: мусор с кавычкой или переводом строки сломал бы весь конфиг.
+	if !isBase64Key(key) {
+		return "", fmt.Errorf("xray: reality private key %s is not a base64 x25519 key", m.realityPrivateKeyPath)
+	}
+	return key, nil
+}
+
+func isBase64Key(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '+', r == '/', r == '=':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Reload asks systemd to reload the unit (SIGHUP-style, keeps connections).
@@ -95,7 +162,8 @@ type RealityKeys struct {
 //   - import: the key file MUST already exist (migrated from the old panel). This
 //     mode NEVER generates — a missing file is a hard error, because silently
 //     generating would rotate the pbk and disconnect the whole node.
-func (m *Manager) EnsureRealityKeypair(mode config.KeypairMode, privKeyPath string) (RealityKeys, error) {
+func (m *Manager) EnsureRealityKeypair(mode config.KeypairMode) (RealityKeys, error) {
+	privKeyPath := m.realityPrivateKeyPath
 	if privKeyPath == "" {
 		return RealityKeys{}, errors.New("xray: reality private key path is empty")
 	}
