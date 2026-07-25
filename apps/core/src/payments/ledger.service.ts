@@ -143,19 +143,67 @@ export class LedgerService {
       })
       .where(eq(schema.subscription.id, subscription.id));
 
+    await this.syncSquads(tx, subscription.id, plan.squadIds);
+
     return { action, newExpireAt, subscriptionId: subscription.id };
   }
 
-  /** Пометка первой оплаты — partial unique index не даст пометить дважды. */
-  private async markFirstPaid(tx: Tx, payment: typeof schema.payment.$inferSelect) {
-    try {
+  /**
+   * Доступ подписки к нодам = членство в squad'ах тарифа.
+   * Без этой синхронизации оплата не давала доступа вообще: подписка «активна»,
+   * конфиг отдаётся, но uuid не попадал в desired-state ноды и Xray рвал хендшейк.
+   * Лишние squad'ы снимаем — при смене тарифа доступ не должен накапливаться.
+   */
+  private async syncSquads(tx: Tx, subscriptionId: string, squadIds: string[]) {
+    if (squadIds.length > 0) {
       await tx
-        .update(schema.payment)
-        .set({ isFirstPaid: true })
-        .where(and(eq(schema.payment.id, payment.id), eq(schema.payment.isFirstPaid, false)));
-    } catch {
-      // нарушение partial unique = у подписчика уже есть первая оплата, это штатная ветка
+        .insert(schema.subscriptionSquad)
+        .values(squadIds.map((squadId) => ({ subscriptionId, squadId })))
+        .onConflictDoNothing();
     }
+
+    const existing = await tx
+      .select()
+      .from(schema.subscriptionSquad)
+      .where(eq(schema.subscriptionSquad.subscriptionId, subscriptionId));
+
+    const extra = existing.filter((row) => !squadIds.includes(row.squadId));
+    for (const row of extra) {
+      await tx
+        .delete(schema.subscriptionSquad)
+        .where(
+          and(
+            eq(schema.subscriptionSquad.subscriptionId, subscriptionId),
+            eq(schema.subscriptionSquad.squadId, row.squadId),
+          ),
+        );
+    }
+  }
+
+  /**
+   * Пометка первой оплаты подписчика (нужна для атрибуции рекламы).
+   *
+   * Нельзя «пометить и поймать конфликт»: в Postgres нарушение partial unique
+   * обрывает ВСЮ транзакцию, а JS-catch внутри неё бесполезен — последующие
+   * запросы падают, и фулфилмент второго платежа откатывался целиком
+   * (деньги приняты, дней нет, платёж навсегда pending).
+   * Поэтому условие «первой оплаты ещё нет» проверяется внутри самого UPDATE —
+   * конфликт не возникает вовсе.
+   */
+  private async markFirstPaid(tx: Tx, payment: typeof schema.payment.$inferSelect) {
+    await tx
+      .update(schema.payment)
+      .set({ isFirstPaid: true })
+      .where(
+        and(
+          eq(schema.payment.id, payment.id),
+          eq(schema.payment.isFirstPaid, false),
+          sql`not exists (
+            select 1 from ${schema.payment} p2
+            where p2.subscriber_id = ${payment.subscriberId} and p2.is_first_paid
+          )`,
+        ),
+      );
   }
 
   private async append(

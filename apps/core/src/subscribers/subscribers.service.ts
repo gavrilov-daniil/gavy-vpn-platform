@@ -283,6 +283,15 @@ export class SubscribersService {
       })
       .where(eq(schema.subscription.id, subscription.id));
 
+    // без членства в squad'ах тарифа юзер не попадёт в desired-state ноды
+    // и получит рабочий на вид конфиг, по которому Xray разорвёт хендшейк
+    if (plan.squadIds.length > 0) {
+      await this.db
+        .insert(schema.subscriptionSquad)
+        .values(plan.squadIds.map((squadId) => ({ subscriptionId: subscription.id, squadId })))
+        .onConflictDoNothing();
+    }
+
     this.log.log(`триал выдан подписчику ${subscriberId} до ${expireAt.toISOString()}`);
     return { ok: true, expireAt, subscriptionUrl: `https://${this.cfg.subPublicHost}/auto/${subscription.shortUuid}` };
   }

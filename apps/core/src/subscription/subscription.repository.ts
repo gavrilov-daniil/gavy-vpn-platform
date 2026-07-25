@@ -14,7 +14,10 @@ export interface SubscriptionBundle {
 export class SubscriptionRepository {
   constructor(@Inject(DB) private readonly db: Database) {}
 
-  async findByShortUuid(orgId: string, shortUuid: string) {
+  async findByShortUuid(
+    orgId: string,
+    shortUuid: string,
+  ): Promise<typeof schema.subscription.$inferSelect | null> {
     const rows = await this.db
       .select()
       .from(schema.subscription)
@@ -23,7 +26,19 @@ export class SubscriptionRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * Легаси-путь `/api/sub/<id>`. У мигрируемых с Remnawave клиентов в сохранённых
+   * ссылках стоит shortUuid, а не наш внутренний PK, поэтому сначала пробуем
+   * shortUuid и только потом id — иначе в момент переключения вся легаси-база
+   * молча получит заглушку «подписка не найдена».
+   */
   async findById(orgId: string, id: string) {
+    const byShortUuid = await this.findByShortUuid(orgId, id);
+    if (byShortUuid) return byShortUuid;
+
+    // внутренний PK — uuid; на произвольной строке Postgres бросит ошибку типа
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+
     const rows = await this.db
       .select()
       .from(schema.subscription)

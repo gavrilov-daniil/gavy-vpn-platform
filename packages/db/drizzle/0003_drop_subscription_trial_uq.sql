@@ -1,0 +1,11 @@
+-- Снимаем subscription_trial_uq (заведён в 0001).
+--
+-- Индекс был UNIQUE(subscription_id) WHERE action='created' и задумывался как
+-- «триал выдаётся один раз». На деле он ломал ОПЛАЧЕННОЕ продление: когда срок
+-- подписки уже истёк, активация записывается с action='created', попадает в
+-- конфликт, onConflictDoNothing его глотает — и функция выходит до продления
+-- срока, хотя списание в ledger уже сделано. Клиент платит и не получает дней.
+--
+-- Триал и без него защищён условным UPDATE по trial_used_at в activateTrial,
+-- а идемпотентность активации даёт sub_activation_payment_uq (UNIQUE по payment_id).
+DROP INDEX IF EXISTS subscription_trial_uq;

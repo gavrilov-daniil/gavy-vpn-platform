@@ -22,6 +22,13 @@
       "when": 1785010000000,
       "tag": "0002_job_dedup",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785020000000,
+      "tag": "0003_drop_subscription_trial_uq",
+      "breakpoints": true
     }
   ]
 }
