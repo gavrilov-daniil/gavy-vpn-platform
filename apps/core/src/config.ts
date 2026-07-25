@@ -18,6 +18,16 @@ export interface CoreConfig {
   subRateLimitTrustProxy: boolean;
   /** Окно «живого» устройства: не виденные дольше — не занимают слот hwid-лимита. */
   hwidActiveWindowDays: number;
+  /** Перебор пароля оператора: жёстко по IP. */
+  adminLoginRateLimitPerIp: RateLimitRule;
+  /** Тот же перебор, но по email: смена IP не должна обнулять счётчик по учётке. */
+  adminLoginRateLimitPerEmail: RateLimitRule;
+  /** Остальной админский API по IP. Мягко: это рабочий инструмент, а не публичная точка. */
+  adminRateLimitPerIp: RateLimitRule;
+  /** Вебхуки провайдеров по IP. С запасом: провайдер догоняет очередь пачкой. */
+  webhookRateLimitPerIp: RateLimitRule;
+  /** Служебные вызовы (бот, воркеры, node-agent) по IP. */
+  internalRateLimitPerIp: RateLimitRule;
   /** Ключ шифрования кредов мерчантов. В БД креды лежат только зашифрованными. */
   secretsMasterKey: string;
   /** Внешний URL API — из него строятся callback_url для платёжных вебхуков. */
@@ -36,6 +46,8 @@ export interface CoreConfig {
    * ноды действует её собственный токен (node_identity.agent_token_hash).
    */
   agentToken: string;
+  /** Срок жизни невостребованного bootstrap-токена ноды, часы. 0 = без срока. */
+  nodeBootstrapTtlHours: number;
   /**
    * Приватный RSA-ключ (PEM) для подписи desired-state. Пусто — desired-state
    * уходит голым JSON (переходный режим, см. docs/security.md).
@@ -68,6 +80,26 @@ export function loadConfig(): CoreConfig {
     },
     subRateLimitTrustProxy: (process.env.SUB_RATE_LIMIT_TRUST_PROXY ?? "true") !== "false",
     hwidActiveWindowDays: intEnv(process.env.SUB_HWID_ACTIVE_DAYS, 30),
+    adminLoginRateLimitPerIp: {
+      limit: intEnv(process.env.ADMIN_LOGIN_RATE_LIMIT_PER_IP, 10),
+      windowSec: intEnv(process.env.ADMIN_LOGIN_RATE_LIMIT_WINDOW_SEC, 900),
+    },
+    adminLoginRateLimitPerEmail: {
+      limit: intEnv(process.env.ADMIN_LOGIN_RATE_LIMIT_PER_EMAIL, 5),
+      windowSec: intEnv(process.env.ADMIN_LOGIN_RATE_LIMIT_WINDOW_SEC, 900),
+    },
+    adminRateLimitPerIp: {
+      limit: intEnv(process.env.ADMIN_RATE_LIMIT_PER_IP, 300),
+      windowSec: intEnv(process.env.ADMIN_RATE_LIMIT_WINDOW_SEC, 60),
+    },
+    webhookRateLimitPerIp: {
+      limit: intEnv(process.env.WEBHOOK_RATE_LIMIT_PER_IP, 600),
+      windowSec: intEnv(process.env.WEBHOOK_RATE_LIMIT_WINDOW_SEC, 60),
+    },
+    internalRateLimitPerIp: {
+      limit: intEnv(process.env.INTERNAL_RATE_LIMIT_PER_IP, 1200),
+      windowSec: intEnv(process.env.INTERNAL_RATE_LIMIT_WINDOW_SEC, 60),
+    },
     secretsMasterKey: process.env.SECRETS_MASTER_KEY ?? "",
     publicApiUrl: (process.env.PUBLIC_API_URL ?? "http://localhost:3100").replace(/\/+$/, ""),
     paymentSuccessUrl: process.env.PAYMENT_SUCCESS_URL ?? "",
@@ -76,6 +108,7 @@ export function loadConfig(): CoreConfig {
     serviceToken: process.env.SERVICE_TOKEN ?? "",
     adminToken: process.env.ADMIN_TOKEN ?? "",
     agentToken: process.env.AGENT_TOKEN ?? "",
+    nodeBootstrapTtlHours: intEnv(process.env.NODE_BOOTSTRAP_TTL_HOURS, 24),
     // PEM в env неизбежно приезжает с экранированными переносами — разворачиваем,
     // иначе createPrivateKey ругается на «неправильный» ключ, который на вид верный.
     desiredStateSigningKey: (process.env.DESIRED_STATE_SIGNING_KEY ?? "").replace(/\\n/g, "\n"),

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import { safeCompare } from "@vpn/core-kit";
 import { DB } from "../db/db.module.js";
@@ -47,21 +47,33 @@ export class NodeIdentityService {
    * Действующий agent-токен при этом не отзывается: нода продолжает работать, пока
    * агент не пройдёт энроллмент заново. Иначе выпуск токена «на всякий случай»
    * ронял бы живую ноду.
+   *
+   * Срок годности — NODE_BOOTSTRAP_TTL_HOURS: распечатка из админки, забытая в
+   * переписке, не должна оставаться рабочим обменом на agent-токен через полгода.
    */
   async issueBootstrapToken(nodeId: string) {
     const node = await this.requireNode(nodeId);
     const bootstrapToken = randomBytes(TOKEN_BYTES).toString("base64url");
+    const expiresAt = this.bootstrapExpiry();
+    const issued = {
+      bootstrapTokenHash: sha256(bootstrapToken),
+      bootstrapConsumedAt: null,
+      bootstrapExpiresAt: expiresAt,
+    };
 
     await this.db
       .insert(schema.nodeIdentity)
-      .values({ nodeId, bootstrapTokenHash: sha256(bootstrapToken), bootstrapConsumedAt: null })
-      .onConflictDoUpdate({
-        target: schema.nodeIdentity.nodeId,
-        set: { bootstrapTokenHash: sha256(bootstrapToken), bootstrapConsumedAt: null },
-      });
+      .values({ nodeId, ...issued })
+      .onConflictDoUpdate({ target: schema.nodeIdentity.nodeId, set: issued });
 
-    this.log.log(`нода ${node.name}: выпущен bootstrap-токен`);
-    return { nodeId, nodeName: node.name, bootstrapToken };
+    this.log.log(`нода ${node.name}: выпущен bootstrap-токен, годен до ${expiresAt?.toISOString() ?? "без срока"}`);
+    return { nodeId, nodeName: node.name, bootstrapToken, bootstrapExpiresAt: expiresAt };
+  }
+
+  /** 0 часов = без срока: ops-рубильник на случай, если TTL мешает разворачивать парк. */
+  private bootstrapExpiry(): Date | null {
+    const hours = this.cfg.nodeBootstrapTtlHours;
+    return hours > 0 ? new Date(Date.now() + hours * 3600_000) : null;
   }
 
   /**
@@ -74,6 +86,10 @@ export class NodeIdentityService {
    * agent_epoch инкрементится здесь же: он namespace'ит report_id статистики, и
    * переналитая нода не должна коллизиться с уже принятыми батчами прошлой
    * инкарнации.
+   *
+   * Срок годности проверяется тем же условным UPDATE, а не отдельным SELECT: иначе
+   * между проверкой и записью токен успевал бы протухнуть. NULL в bootstrap_expires_at
+   * означает «без срока» (токены до появления колонки), а не «истёк».
    */
   async enroll(input: EnrollInput) {
     const nodeId = input.nodeId ?? "";
@@ -99,11 +115,15 @@ export class NodeIdentityService {
           eq(schema.nodeIdentity.nodeId, nodeId),
           eq(schema.nodeIdentity.bootstrapTokenHash, sha256(bootstrapToken)),
           isNull(schema.nodeIdentity.bootstrapConsumedAt),
+          or(
+            isNull(schema.nodeIdentity.bootstrapExpiresAt),
+            gt(schema.nodeIdentity.bootstrapExpiresAt, now),
+          ),
         ),
       )
       .returning();
 
-    if (!enrolled) throw new UnauthorizedException("bootstrap-токен недействителен или уже использован");
+    if (!enrolled) throw new UnauthorizedException(await this.enrollRejection(nodeId, bootstrapToken));
 
     // Reality-идентичность и пересборка идут ПОСЛЕ выдачи токена и не роняют
     // энроллмент: bootstrap уже сожжён, и 500 здесь оставил бы ноду без доступа
@@ -119,6 +139,34 @@ export class NodeIdentityService {
 
     this.log.log(`нода ${nodeId}: энроллмент выполнен, agent_epoch=${enrolled.agentEpoch}`);
     return { nodeId, agentToken, agentEpoch: enrolled.agentEpoch };
+  }
+
+  /**
+   * Почему условный UPDATE не нашёл строку. Диагностический SELECT делается только
+   * после отказа и только по совпадающему хешу — присланный токен и так у вызывающего,
+   * лишнего мы не раскрываем. Без этого «истёк» и «уже использован» выглядели бы для
+   * оператора одинаково, а лечатся они по-разному.
+   */
+  private async enrollRejection(nodeId: string, bootstrapToken: string): Promise<string> {
+    const [row] = await this.db
+      .select({
+        consumedAt: schema.nodeIdentity.bootstrapConsumedAt,
+        expiresAt: schema.nodeIdentity.bootstrapExpiresAt,
+      })
+      .from(schema.nodeIdentity)
+      .where(
+        and(
+          eq(schema.nodeIdentity.nodeId, nodeId),
+          eq(schema.nodeIdentity.bootstrapTokenHash, sha256(bootstrapToken)),
+        ),
+      )
+      .limit(1);
+
+    if (row && !row.consumedAt && row.expiresAt && row.expiresAt <= new Date()) {
+      this.log.warn(`нода ${nodeId}: энроллмент отклонён, bootstrap-токен истёк ${row.expiresAt.toISOString()}`);
+      return `bootstrap-токен истёк ${row.expiresAt.toISOString()}: выпустите новый через POST /api/admin/nodes/${nodeId}/enrollment`;
+    }
+    return "bootstrap-токен недействителен или уже использован";
   }
 
   /**

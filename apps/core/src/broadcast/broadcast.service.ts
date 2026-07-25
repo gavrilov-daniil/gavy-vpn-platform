@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
@@ -20,6 +20,11 @@ export interface CreateBroadcastInput {
 const BATCH_SIZE = 500;
 const INSERT_CHUNK = 1000;
 const RUNNABLE_STATUSES = ["draft", "scheduled", "running"] as const;
+
+/** Аренда рассылки. Переживший процесс не должен держать её вечно, поэтому с истечением. */
+const LEASE_MINUTES = 5;
+/** Продление на ходу: прогон длиннее аренды, иначе её перехватит следующий тик джобы. */
+const LEASE_RENEW_MS = 60_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -79,85 +84,124 @@ export class BroadcastService {
     return { broadcast: row, recipients };
   }
 
-  async run(broadcastId: string) {
+  /**
+   * Взять аренду на прогон. Единственная точка входа в рассылку — и для джобы
+   * broadcast-resume, и для кнопки в админке.
+   *
+   * Аренда — `broadcast.started_at`, а не Set в памяти: ручной прогон идёт
+   * fire-and-forget в процессе api, добор — в процессе воркера, и друг друга они
+   * в памяти не видят. Без общей аренды одну рассылку гнали бы два потока: дубли
+   * сообщений гасит dedup_key в message_log, но фактический темп выходит вдвое
+   * выше throttle_per_sec, и Telegram отвечает 429.
+   *
+   * `started_at` со сроком в 5 минут, а не «взял навсегда»: процесс, умерший
+   * посреди прогона, иначе запер бы рассылку до ручного вмешательства.
+   */
+  async claim(broadcastId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
     const claimed = await this.db
       .update(schema.broadcast)
-      .set({
-        status: "running",
-        startedAt: sql`coalesce(${schema.broadcast.startedAt}, now())`,
-        updatedAt: new Date(),
-      })
+      .set({ status: "running", startedAt: new Date(), updatedAt: new Date() })
       .where(
         and(
           eq(schema.broadcast.orgId, this.cfg.defaultOrgId),
           eq(schema.broadcast.id, broadcastId),
           inArray(schema.broadcast.status, [...RUNNABLE_STATUSES]),
+          // draft/scheduled арендовать некому — прогона ещё не было; у running аренду
+          // отдаём, только если её никто не держит или держатель отвалился
+          or(
+            ne(schema.broadcast.status, "running"),
+            isNull(schema.broadcast.startedAt),
+            sql`${schema.broadcast.startedAt} < now() - ${`${LEASE_MINUTES} minutes`}::interval`,
+          ),
         ),
       )
-      .returning();
+      .returning({ id: schema.broadcast.id });
 
-    if (claimed.length === 0) {
-      const current = await this.getRow(broadcastId);
-      return { ok: false as const, reason: `нельзя запустить рассылку в статусе ${current.status}` };
-    }
+    if (claimed.length > 0) return { ok: true };
 
-    const broadcast = claimed[0];
+    const current = await this.getRow(broadcastId);
+    if (current.status === "running") return { ok: false, reason: "рассылка уже выполняется" };
+    return { ok: false, reason: `нельзя запустить рассылку в статусе ${current.status}` };
+  }
+
+  /** Аренда + прогон. Для вызывающего, которому не нужно отвечать до начала рассылки. */
+  async run(broadcastId: string) {
+    const claim = await this.claim(broadcastId);
+    if (!claim.ok) return { ok: false as const, reason: claim.reason };
+    return this.drain(broadcastId);
+  }
+
+  /**
+   * Отправка под УЖЕ взятой арендой. Вызывать только после успешного claim():
+   * второй drain на той же рассылке — это тот самый двойной темп.
+   */
+  async drain(broadcastId: string) {
+    const broadcast = await this.getRow(broadcastId);
     const pauseMs = Math.ceil(1000 / Math.max(broadcast.throttlePerSec, 1));
     const counts = { sent: 0, failed: 0, skipped: 0, duplicate: 0 };
 
-    for (;;) {
-      const fresh = await this.getRow(broadcastId);
-      if (fresh.status === "canceled") {
-        this.log.warn(`broadcast ${broadcastId} отменён на ходу, остановлен`);
-        return { ok: true as const, canceled: true, ...counts };
-      }
+    const renew = setInterval(() => {
+      void this.renewLease(broadcastId);
+    }, LEASE_RENEW_MS);
+    renew.unref();
 
-      const batch = await this.db
-        .select({ recipient: schema.broadcastRecipient, subscriber: schema.subscriber })
-        .from(schema.broadcastRecipient)
-        .innerJoin(schema.subscriber, eq(schema.broadcastRecipient.subscriberId, schema.subscriber.id))
-        .where(
-          and(
-            eq(schema.broadcastRecipient.orgId, this.cfg.defaultOrgId),
-            eq(schema.broadcastRecipient.broadcastId, broadcastId),
-            eq(schema.broadcastRecipient.status, "pending"),
-          ),
-        )
-        .limit(BATCH_SIZE);
-      if (batch.length === 0) break;
-
-      for (const { recipient, subscriber } of batch) {
-        if (subscriber.telegramId === null) {
-          await this.markRecipient(recipient.id, "skipped", "no_telegram_id");
-          counts.skipped++;
-          continue;
+    try {
+      for (;;) {
+        const fresh = await this.getRow(broadcastId);
+        if (fresh.status === "canceled") {
+          this.log.warn(`broadcast ${broadcastId} отменён на ходу, остановлен`);
+          return { ok: true as const, canceled: true, ...counts };
         }
 
-        const result = await this.dispatch.send({
-          subscriberId: subscriber.id,
-          telegramId: subscriber.telegramId,
-          kind: "broadcast",
-          refId: broadcastId,
-          dedupKey: `broadcast:${broadcastId}:${subscriber.id}`,
-          bodyHtml: broadcast.bodyHtml,
-          buttons: broadcast.buttons,
-          imageFileId: broadcast.imageFileId,
-        });
+        const batch = await this.db
+          .select({ recipient: schema.broadcastRecipient, subscriber: schema.subscriber })
+          .from(schema.broadcastRecipient)
+          .innerJoin(schema.subscriber, eq(schema.broadcastRecipient.subscriberId, schema.subscriber.id))
+          .where(
+            and(
+              eq(schema.broadcastRecipient.orgId, this.cfg.defaultOrgId),
+              eq(schema.broadcastRecipient.broadcastId, broadcastId),
+              eq(schema.broadcastRecipient.status, "pending"),
+            ),
+          )
+          .limit(BATCH_SIZE);
+        if (batch.length === 0) break;
 
-        if (result.outcome === "sent") {
-          await this.markRecipient(recipient.id, "sent");
-          counts.sent++;
-        } else if (result.outcome === "duplicate") {
-          // адресату уже отправляли в прошлом запуске — приводим строку к факту
-          await this.markRecipient(recipient.id, "sent");
-          counts.duplicate++;
-        } else {
-          await this.markRecipient(recipient.id, "failed", result.outcome === "blocked" ? "blocked" : "error");
-          counts.failed++;
+        for (const { recipient, subscriber } of batch) {
+          if (subscriber.telegramId === null) {
+            await this.markRecipient(recipient.id, "skipped", "no_telegram_id");
+            counts.skipped++;
+            continue;
+          }
+
+          const result = await this.dispatch.send({
+            subscriberId: subscriber.id,
+            telegramId: subscriber.telegramId,
+            kind: "broadcast",
+            refId: broadcastId,
+            dedupKey: `broadcast:${broadcastId}:${subscriber.id}`,
+            bodyHtml: broadcast.bodyHtml,
+            buttons: broadcast.buttons,
+            imageFileId: broadcast.imageFileId,
+          });
+
+          if (result.outcome === "sent") {
+            await this.markRecipient(recipient.id, "sent");
+            counts.sent++;
+          } else if (result.outcome === "duplicate") {
+            // адресату уже отправляли в прошлом запуске — приводим строку к факту
+            await this.markRecipient(recipient.id, "sent");
+            counts.duplicate++;
+          } else {
+            await this.markRecipient(recipient.id, "failed", result.outcome === "blocked" ? "blocked" : "error");
+            counts.failed++;
+          }
+
+          await sleep(pauseMs);
         }
-
-        await sleep(pauseMs);
       }
+    } finally {
+      clearInterval(renew);
     }
 
     await this.db
@@ -173,6 +217,26 @@ export class BroadcastService {
 
     this.log.log(`broadcast ${broadcastId} завершён: ${JSON.stringify(counts)}`);
     return { ok: true as const, canceled: false, ...counts };
+  }
+
+  /** Продление аренды на ходу. Сбой продления не имеет права уронить сам прогон. */
+  private async renewLease(broadcastId: string): Promise<void> {
+    try {
+      await this.db
+        .update(schema.broadcast)
+        .set({ startedAt: new Date() })
+        .where(
+          and(
+            eq(schema.broadcast.orgId, this.cfg.defaultOrgId),
+            eq(schema.broadcast.id, broadcastId),
+            eq(schema.broadcast.status, "running"),
+          ),
+        );
+    } catch (err) {
+      this.log.warn(
+        `не удалось продлить аренду рассылки ${broadcastId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**

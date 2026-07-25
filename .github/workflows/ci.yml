@@ -1,0 +1,159 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Репозиторий публичный: секретов в прогоне нет и быть не должно.
+# Все значения ниже — фиктивные, но валидные по формату (core падает на старте,
+# если SECRETS_MASTER_KEY пуст или короче 16 символов).
+env:
+  SECRETS_MASTER_KEY: ci-fake-master-key-0123456789
+  ADMIN_TOKEN: ci-fake-admin-token
+  SERVICE_TOKEN: ci-fake-service-token
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    # Часть тестов apps/core работает против живого Postgres (apps/core/src/testing/fixtures.test.ts),
+    # изолируясь собственным org_id на процесс. Без базы они не «скипаются», а падают.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vpn
+          POSTGRES_PASSWORD: vpn
+          POSTGRES_DB: vpn_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vpn -d vpn_platform"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://vpn:vpn@localhost:5432/vpn_platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - name: Схема для тестов
+        run: pnpm --filter @vpn/db build && pnpm --filter @vpn/db migrate
+
+      - run: pnpm test
+
+      - run: pnpm build
+
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/node-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: apps/node-agent/go.sum
+
+      - run: go vet ./...
+
+      # gofmt всегда выходит с 0 — падаем сами, если список файлов непустой
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt не применён к файлам:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go test ./...
+
+      # Кросс-сборка linux/amd64 + linux/arm64: на ноды уезжает статический бинарник,
+      # и ломается она обычно не компиляцией, а тегами сборки под чужой GOOS.
+      - run: make all
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vpn
+          POSTGRES_PASSWORD: vpn
+          POSTGRES_DB: vpn_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vpn -d vpn_platform"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://vpn:vpn@localhost:5432/vpn_platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @vpn/db build
+
+      - run: pnpm --filter @vpn/db migrate
+
+      # Проверка ловит грабли с `when` в _journal.json: drizzle применяет миграции
+      # по возрастанию `when` и МОЛЧА пропускает ту, у которой он меньше уже
+      # применённой. Без сверки счётчиков прогон остаётся зелёным, а колонки в БД нет.
+      - name: Все миграции применены
+        working-directory: packages/db
+        run: |
+          node --input-type=module -e '
+            import { readFile } from "node:fs/promises";
+            import postgres from "postgres";
+
+            const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8"));
+            const sql = postgres(process.env.DATABASE_URL, { max: 1 });
+            const applied = await sql`select created_at from drizzle.__drizzle_migrations order by created_at`;
+            await sql.end();
+
+            console.log(`в журнале ${journal.entries.length}, применено ${applied.length}`);
+            if (applied.length !== journal.entries.length) {
+              console.error("применились не все миграции: у новой when в _journal.json обязан быть строго больше максимального существующего");
+              process.exit(1);
+            }
+
+            const whens = journal.entries.map((e) => e.when);
+            for (let i = 1; i < whens.length; i += 1) {
+              if (whens[i] <= whens[i - 1]) {
+                console.error(`_journal.json: when не растёт на записи ${journal.entries[i].tag}`);
+                process.exit(1);
+              }
+            }
+          '

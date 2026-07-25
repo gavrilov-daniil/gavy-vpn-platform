@@ -1,6 +1,8 @@
 import { Controller, Get, Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { AdminGuard } from "./common/admin.guard.js";
+import { RateLimitGuard } from "./common/rate-limit.guard.js";
+import { RateLimitService } from "./common/rate-limit.service.js";
 import { ServiceTokenGuard } from "./common/service-token.guard.js";
 import { DbModule } from "./db/db.module.js";
 import { SubscriptionModule } from "./subscription/subscription.module.js";
@@ -39,8 +41,12 @@ class HealthController {
     WorkersModule,
   ],
   controllers: [HealthController],
-  // два гварда на разные префиксы: /internal/* — сервисный токен, /api/admin/* — админский
+  // Гварды на разные префиксы: /internal/* — сервисный токен, /api/admin/* — админский.
+  // Порядок несущий: глобальные гварды выполняются в порядке объявления, и лимитер
+  // обязан стоять первым — иначе перебор токена отсекался бы 401 до счётчика.
   providers: [
+    RateLimitService,
+    { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_GUARD, useClass: ServiceTokenGuard },
     { provide: APP_GUARD, useClass: AdminGuard },
   ],

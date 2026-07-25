@@ -78,6 +78,13 @@
       "when": 1785040050000,
       "tag": "0010_subscriber_device_last_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785040060000,
+      "tag": "0011_node_identity_bootstrap_ttl",
+      "breakpoints": true
     }
   ]
 }

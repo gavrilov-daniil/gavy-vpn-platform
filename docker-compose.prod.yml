@@ -1,0 +1,136 @@
+# Боевой стенд платформы. Разворачивается на отдельном хосте: держать её на одной
+# машине с действующей панелью нельзя — не хватит памяти, и два control-plane не должны
+# делить ноды (см. docs/migration.md, раздел cutover).
+#
+# Запуск:
+#   cp .env.example .env && отредактировать
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml run --rm migrate
+#
+# Порты наружу торчат только у caddy. postgres и redis слушают внутри сети.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vpn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?нужен POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-vpn_platform}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vpn} -d ${POSTGRES_DB:-vpn_platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Разовая команда: docker compose run --rm migrate
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/core/Dockerfile
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-vpn}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vpn_platform}
+    command: ["node", "node_modules/.bin/drizzle-kit", "migrate", "--config", "node_modules/@vpn/db/drizzle.config.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  core:
+    build:
+      context: .
+      dockerfile: apps/core/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      INSTANCE_TYPE: api
+      DATABASE_URL: postgres://${POSTGRES_USER:-vpn}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vpn_platform}
+      REDIS_URL: redis://redis:6379
+      BOT_INTERNAL_URL: http://bot:3300
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Тот же образ, режим worker: cron-эмиттер выбирается advisory-lock'ом,
+  # поэтому лишний инстанс расписание не задвоит.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/core/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      INSTANCE_TYPE: worker
+      DATABASE_URL: postgres://${POSTGRES_USER:-vpn}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vpn_platform}
+      REDIS_URL: redis://redis:6379
+      BOT_INTERNAL_URL: http://bot:3300
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  bot:
+    build:
+      context: .
+      dockerfile: apps/bot/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CORE_API_URL: http://core:3100
+    depends_on:
+      - core
+
+  # Собирает статику админки в volume, из которого её отдаёт caddy
+  admin-build:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      target: dist
+    volumes:
+      - admin-dist:/out
+    command: ["sh", "-c", "rm -rf /out/* && cp -r /dist/. /out/"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # ДОМЕН МЕНЯТЬ НЕЛЬЗЯ: у мигрируемых клиентов он зашит в сохранённой ссылке
+      # подписки. Смена = молчаливый отвал всей базы (docs/migration.md, P0-2).
+      SUB_DOMAIN: ${SUB_PUBLIC_HOST:?нужен SUB_PUBLIC_HOST}
+      ADMIN_DOMAIN: ${ADMIN_PUBLIC_HOST:?нужен ADMIN_PUBLIC_HOST}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - admin-dist:/srv/admin:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - core
+      - admin-build
+
+volumes:
+  pgdata:
+  redisdata:
+  admin-dist:
+  caddydata:
+  caddyconfig:

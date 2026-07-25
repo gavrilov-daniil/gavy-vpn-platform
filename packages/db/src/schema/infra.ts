@@ -152,6 +152,9 @@ export const nodeIdentity = pgTable("node_identity", {
   certFingerprint: text("cert_fingerprint"),
   bootstrapTokenHash: text("bootstrap_token_hash"),
   bootstrapConsumedAt: timestamp("bootstrap_consumed_at", { withTimezone: true }),
+  // Срок годности невостребованного bootstrap-токена. NULL = без срока (токены,
+  // выпущенные до появления колонки, и явно выключенный TTL).
+  bootstrapExpiresAt: timestamp("bootstrap_expires_at", { withTimezone: true }),
   // per-node секрет агента: токен ноды A не должен открывать ноду B
   agentTokenHash: text("agent_token_hash"),
   agentTokenIssuedAt: timestamp("agent_token_issued_at", { withTimezone: true }),

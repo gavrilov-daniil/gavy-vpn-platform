@@ -44,15 +44,22 @@ export class BroadcastAdminController {
   }
 
   /**
-   * Очередей ещё нет (BullMQ — следующая веха), поэтому прогон идёт фоном в этом процессе:
-   * держать HTTP-соединение на всё время рассылки нельзя. Прогресс — через GET broadcasts/:id.
+   * Прогон идёт фоном в этом процессе: держать HTTP-соединение на всё время рассылки нельзя.
+   * Прогресс — через GET broadcasts/:id.
+   *
+   * Аренда берётся ДО ответа, а не внутри фоновой задачи: иначе два клика подряд оба
+   * получили бы started=true, и о том, что второй прогон не стартовал, оператор узнал бы
+   * только из логов. Та же аренда у джобы broadcast-resume — гнать рассылку в два потока
+   * нельзя, Telegram отвечает на удвоенный темп 429.
    */
   @Post("broadcasts/:id/run")
   async run(@Param("id") id: string) {
     await this.broadcasts.get(id);
-    void this.broadcasts
-      .run(id)
-      .catch((err) => this.log.error(`broadcast ${id} упал: ${err instanceof Error ? err.message : String(err)}`));
+
+    const claim = await this.broadcasts.claim(id);
+    if (!claim.ok) return { started: false, reason: claim.reason };
+
+    this.drainInBackground(id);
     return { started: true };
   }
 
@@ -62,10 +69,17 @@ export class BroadcastAdminController {
     const result = await this.broadcasts.retryFailed(id);
     if (!result.ok || result.retried === 0) return { ...result, started: false };
 
-    void this.broadcasts
-      .run(id)
-      .catch((err) => this.log.error(`broadcast ${id} упал: ${err instanceof Error ? err.message : String(err)}`));
+    const claim = await this.broadcasts.claim(id);
+    if (!claim.ok) return { ...result, started: false, reason: claim.reason };
+
+    this.drainInBackground(id);
     return { ...result, started: true };
+  }
+
+  private drainInBackground(id: string): void {
+    void this.broadcasts
+      .drain(id)
+      .catch((err) => this.log.error(`broadcast ${id} упал: ${err instanceof Error ? err.message : String(err)}`));
   }
 
   @Post("broadcasts/:id/cancel")

@@ -1,0 +1,46 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# --- Публичный домен подписки ---
+# Домен и пути обязаны совпадать с тем, что уже сохранено у клиентов:
+# /auto/<shortUuid> и legacy /api/sub/<id>. Смена любого из них = молчаливый
+# отвал мигрированной базы (docs/migration.md, P0-2).
+{$SUB_DOMAIN} {
+	encode gzip
+
+	# Выдача подписки и вебхуки платёжных провайдеров
+	@public path /auto/* /api/sub/* /webhooks/* /healthz
+	handle @public {
+		reverse_proxy core:3100
+	}
+
+	# Вебхук Telegram-бота: секрет проверяет сам бот заголовком
+	handle /tg {
+		reverse_proxy bot:3300
+	}
+
+	# Всё остальное на этом домене наружу не смотрит: админский и служебный API
+	# доступны только на своём домене.
+	handle {
+		respond "not found" 404
+	}
+}
+
+# --- Домен админки ---
+# Отдельный домен, чтобы админский API не висел там же, где публичная выдача:
+# случайно открытый путь на домене подписки — это дамп базы подписчиков.
+{$ADMIN_DOMAIN} {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy core:3100
+	}
+
+	# SPA: любой маршрут отдаёт index.html, роутинг внутри React
+	handle {
+		root * /srv/admin
+		try_files {path} /index.html
+		file_server
+	}
+}
