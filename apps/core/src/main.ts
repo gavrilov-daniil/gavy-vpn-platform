@@ -14,7 +14,8 @@ async function bootstrap() {
     return;
   }
 
-  const app = await NestFactory.create(AppModule);
+  // rawBody нужен для проверки подписей вебхуков по сырым байтам тела
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   await app.listen(cfg.port);
   log.log(`core api on :${cfg.port} (org=${cfg.defaultOrgId})`);
 }

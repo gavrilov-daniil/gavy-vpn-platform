@@ -2,6 +2,7 @@ import { Controller, Get, Module } from "@nestjs/common";
 import { DbModule } from "./db/db.module.js";
 import { SubscriptionModule } from "./subscription/subscription.module.js";
 import { AdminModule } from "./admin/admin.module.js";
+import { PaymentsModule } from "./payments/payments.module.js";
 
 @Controller()
 class HealthController {
@@ -12,7 +13,7 @@ class HealthController {
 }
 
 @Module({
-  imports: [DbModule, SubscriptionModule, AdminModule],
+  imports: [DbModule, SubscriptionModule, AdminModule, PaymentsModule],
   controllers: [HealthController],
 })
 export class AppModule {}
