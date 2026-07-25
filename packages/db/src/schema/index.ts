@@ -5,3 +5,5 @@ export * from "./delivery.js";
 export * from "./traffic.js";
 export * from "./billing.js";
 export * from "./abuse.js";
+export * from "./support.js";
+export * from "./crm.js";

@@ -83,6 +83,18 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  packages/core-kit:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.4
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.1
+        version: 4.23.1
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
   packages/db:
     dependencies:
       drizzle-orm:
@@ -98,6 +110,22 @@ importers:
       drizzle-kit:
         specifier: ^0.30.6
         version: 0.30.6
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/payments:
+    dependencies:
+      '@vpn/core-kit':
+        specifier: workspace:*
+        version: link:../core-kit
+    devDependencies:
+      '@types/node':
+        specifier: ^22.7.4
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.1
+        version: 4.23.1
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

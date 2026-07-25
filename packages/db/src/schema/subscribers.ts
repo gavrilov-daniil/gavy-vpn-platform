@@ -12,6 +12,13 @@ export const subscriber = pgTable("subscriber", {
   marketingOptOut: boolean("marketing_opt_out").notNull().default(false),
   tgBlocked: boolean("tg_blocked").notNull().default(false),
   description: text("description"),
+  languageCode: text("language_code"),
+  // first-touch атрибуция: пишется ТОЛЬКО при создании, никогда не перезаписывается
+  campaignLinkId: uuid("campaign_link_id"),
+  referrerSubscriberId: uuid("referrer_subscriber_id"),
+  // блокировка списаний, если баланс ушёл в минус после отзыва реф-награды
+  balanceLockedReason: text("balance_locked_reason"),
+  trialUsedAt: timestamp("trial_used_at", { withTimezone: true }),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("subscriber_org_tg_uq").on(t.orgId, t.telegramId)]);
 

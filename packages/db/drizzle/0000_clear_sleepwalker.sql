@@ -38,6 +38,11 @@ CREATE TABLE "subscriber" (
 	"marketing_opt_out" boolean DEFAULT false NOT NULL,
 	"tg_blocked" boolean DEFAULT false NOT NULL,
 	"description" text,
+	"language_code" text,
+	"campaign_link_id" uuid,
+	"referrer_subscriber_id" uuid,
+	"balance_locked_reason" text,
+	"trial_used_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -345,6 +350,22 @@ CREATE TABLE "traffic_sample" (
 	"window_end" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "external_api_log" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"provider" text NOT NULL,
+	"endpoint" text NOT NULL,
+	"method" text NOT NULL,
+	"request_body" jsonb,
+	"response_body" jsonb,
+	"status_code" integer,
+	"duration_ms" integer,
+	"attempts" integer DEFAULT 1 NOT NULL,
+	"correlation_id" text,
+	"error_message" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "infra_payment" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
@@ -386,8 +407,9 @@ CREATE TABLE "ledger_entry" (
 	"subscriber_id" uuid NOT NULL,
 	"amount_kopeks" bigint NOT NULL,
 	"entry_type" text NOT NULL,
-	"ref_type" text,
-	"ref_id" uuid,
+	"payment_id" uuid,
+	"subscription_id" uuid,
+	"description" text,
 	"idempotency_key" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -396,14 +418,46 @@ CREATE TABLE "payment" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
 	"subscriber_id" uuid NOT NULL,
+	"merchant_id" uuid,
 	"provider" text NOT NULL,
 	"provider_payment_id" text NOT NULL,
+	"provider_ref" text,
+	"purpose" text DEFAULT 'topup' NOT NULL,
+	"plan_id" uuid,
+	"gift_token" text,
 	"amount_kopeks" bigint NOT NULL,
-	"currency" text DEFAULT 'XTR' NOT NULL,
+	"currency" text DEFAULT 'RUB' NOT NULL,
 	"status" text DEFAULT 'pending' NOT NULL,
-	"raw_payload" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"crypto_asset" text,
+	"crypto_network" text,
+	"crypto_amount" numeric(30, 10),
+	"exchange_rate" numeric(20, 8),
+	"rate_locked_at" timestamp with time zone,
+	"expires_at" timestamp with time zone,
 	"paid_at" timestamp with time zone,
+	"is_first_paid" boolean DEFAULT false NOT NULL,
+	"campaign_link_id" uuid,
+	"meta" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "payment_merchant" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"provider" text NOT NULL,
+	"alias" text NOT NULL,
+	"is_enabled" boolean DEFAULT false NOT NULL,
+	"mode" text DEFAULT 'live' NOT NULL,
+	"priority" integer DEFAULT 0 NOT NULL,
+	"credentials" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"purposes" jsonb DEFAULT '["topup","plan"]'::jsonb NOT NULL,
+	"title" text,
+	"last_check_at" timestamp with time zone,
+	"last_check_ok" boolean,
+	"last_check_error" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "plan" (
@@ -416,7 +470,9 @@ CREATE TABLE "plan" (
 	"traffic_gb" integer,
 	"device_limit" integer,
 	"is_trial" boolean DEFAULT false NOT NULL,
-	"is_active" boolean DEFAULT true NOT NULL
+	"is_active" boolean DEFAULT true NOT NULL,
+	"sort_order" integer DEFAULT 0 NOT NULL,
+	"squad_ids" jsonb DEFAULT '[]'::jsonb NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "promo_code" (
@@ -431,11 +487,35 @@ CREATE TABLE "promo_code" (
 	"is_active" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "promo_redemption" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"promo_code_id" uuid NOT NULL,
+	"subscriber_id" uuid NOT NULL,
+	"payment_id" uuid,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "referral" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
 	"referrer_subscriber_id" uuid NOT NULL,
 	"referred_subscriber_id" uuid NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "referral_reward" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"referrer_subscriber_id" uuid NOT NULL,
+	"payment_id" uuid NOT NULL,
+	"amount_kopeks" bigint NOT NULL,
+	"status" text DEFAULT 'pending_refund_window' NOT NULL,
+	"refund_window_until" timestamp with time zone,
+	"available_at" timestamp with time zone,
+	"credited_at" timestamp with time zone,
+	"reverted_at" timestamp with time zone,
+	"revert_reason" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -445,6 +525,7 @@ CREATE TABLE "subscription_activation" (
 	"subscription_id" uuid NOT NULL,
 	"payment_id" uuid NOT NULL,
 	"plan_id" uuid,
+	"action" text DEFAULT 'extended' NOT NULL,
 	"added_days" integer NOT NULL,
 	"new_expire_at" timestamp with time zone NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -481,6 +562,184 @@ CREATE TABLE "torrent_ban" (
 	"expires_at" timestamp with time zone
 );
 --> statement-breakpoint
+CREATE TABLE "ai_suggestion" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"conversation_id" uuid NOT NULL,
+	"message_id" uuid,
+	"model" text,
+	"content" text NOT NULL,
+	"retrieved_doc_ids" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"status" text DEFAULT 'proposed' NOT NULL,
+	"idempotency_key" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "conversation" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"contact_id" uuid NOT NULL,
+	"channel" text DEFAULT 'telegram' NOT NULL,
+	"status" text DEFAULT 'open' NOT NULL,
+	"assignee_user_id" uuid,
+	"ai_mode" text DEFAULT 'suggest' NOT NULL,
+	"priority" text DEFAULT 'normal' NOT NULL,
+	"tags" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"last_message_at" timestamp with time zone,
+	"resolved_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "kb_document" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"title" text NOT NULL,
+	"body" text NOT NULL,
+	"source" text,
+	"lang" text DEFAULT 'ru' NOT NULL,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "message" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"conversation_id" uuid NOT NULL,
+	"sender_type" text NOT NULL,
+	"sender_user_id" uuid,
+	"direction" text NOT NULL,
+	"content" text NOT NULL,
+	"attachments" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"telegram_message_id" bigint,
+	"telegram_update_id" bigint,
+	"dedup_key" text,
+	"delivery_status" text DEFAULT 'pending' NOT NULL,
+	"error" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "support_contact" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"subscriber_id" uuid,
+	"telegram_user_id" bigint NOT NULL,
+	"username" text,
+	"language_code" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "bot_event" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"telegram_user_id" bigint,
+	"subscriber_id" uuid,
+	"event" text NOT NULL,
+	"update_id" bigint,
+	"payload" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "broadcast" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"title" text NOT NULL,
+	"segment_kind" text DEFAULT 'all' NOT NULL,
+	"segment_id" uuid,
+	"body_html" text NOT NULL,
+	"image_file_id" text,
+	"buttons" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"status" text DEFAULT 'draft' NOT NULL,
+	"scheduled_at" timestamp with time zone,
+	"started_at" timestamp with time zone,
+	"finished_at" timestamp with time zone,
+	"throttle_per_sec" integer DEFAULT 20 NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "broadcast_recipient" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"broadcast_id" uuid NOT NULL,
+	"subscriber_id" uuid NOT NULL,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"reason" text,
+	"sent_at" timestamp with time zone
+);
+--> statement-breakpoint
+CREATE TABLE "campaign" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"slug" text NOT NULL,
+	"name" text NOT NULL,
+	"channel" text,
+	"status" text DEFAULT 'active' NOT NULL,
+	"cost_kopeks" bigint DEFAULT 0 NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "campaign_event" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"campaign_link_id" uuid NOT NULL,
+	"subscriber_id" uuid,
+	"payment_id" uuid,
+	"type" text NOT NULL,
+	"meta" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "campaign_link" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"campaign_id" uuid NOT NULL,
+	"code" text NOT NULL,
+	"label" text,
+	"is_archived" boolean DEFAULT false NOT NULL,
+	"registrations" integer DEFAULT 0 NOT NULL,
+	"paying_users" integer DEFAULT 0 NOT NULL,
+	"revenue_kopeks" bigint DEFAULT 0 NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "message_log" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"subscriber_id" uuid NOT NULL,
+	"kind" text NOT NULL,
+	"ref_id" uuid,
+	"dedup_key" text NOT NULL,
+	"status" text DEFAULT 'sent' NOT NULL,
+	"telegram_message_id" bigint,
+	"error" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "segment" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"name" text NOT NULL,
+	"kind" text DEFAULT 'rule' NOT NULL,
+	"predicate" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"is_marketing" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "touchpoint" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid DEFAULT '00000000-0000-0000-0000-000000000001' NOT NULL,
+	"name" text NOT NULL,
+	"trigger_type" text NOT NULL,
+	"trigger_key" text NOT NULL,
+	"delay_hours" integer DEFAULT 0 NOT NULL,
+	"body_html" text NOT NULL,
+	"buttons" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"quiet_hours" jsonb,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "subscriber_device" ADD CONSTRAINT "subscriber_device_subscription_id_subscription_id_fk" FOREIGN KEY ("subscription_id") REFERENCES "public"."subscription"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription" ADD CONSTRAINT "subscription_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "cascade_link" ADD CONSTRAINT "cascade_link_relay_node_id_node_id_fk" FOREIGN KEY ("relay_node_id") REFERENCES "public"."node"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -513,9 +772,18 @@ ALTER TABLE "infra_payment" ADD CONSTRAINT "infra_payment_resource_id_infra_reso
 ALTER TABLE "infra_resource" ADD CONSTRAINT "infra_resource_provider_id_infra_provider_id_fk" FOREIGN KEY ("provider_id") REFERENCES "public"."infra_provider"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "infra_resource" ADD CONSTRAINT "infra_resource_server_id_server_id_fk" FOREIGN KEY ("server_id") REFERENCES "public"."server"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ledger_entry" ADD CONSTRAINT "ledger_entry_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ledger_entry" ADD CONSTRAINT "ledger_entry_payment_id_payment_id_fk" FOREIGN KEY ("payment_id") REFERENCES "public"."payment"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ledger_entry" ADD CONSTRAINT "ledger_entry_subscription_id_subscription_id_fk" FOREIGN KEY ("subscription_id") REFERENCES "public"."subscription"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment" ADD CONSTRAINT "payment_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "payment" ADD CONSTRAINT "payment_merchant_id_payment_merchant_id_fk" FOREIGN KEY ("merchant_id") REFERENCES "public"."payment_merchant"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "payment" ADD CONSTRAINT "payment_plan_id_plan_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."plan"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "promo_redemption" ADD CONSTRAINT "promo_redemption_promo_code_id_promo_code_id_fk" FOREIGN KEY ("promo_code_id") REFERENCES "public"."promo_code"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "promo_redemption" ADD CONSTRAINT "promo_redemption_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "promo_redemption" ADD CONSTRAINT "promo_redemption_payment_id_payment_id_fk" FOREIGN KEY ("payment_id") REFERENCES "public"."payment"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "referral" ADD CONSTRAINT "referral_referrer_subscriber_id_subscriber_id_fk" FOREIGN KEY ("referrer_subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "referral" ADD CONSTRAINT "referral_referred_subscriber_id_subscriber_id_fk" FOREIGN KEY ("referred_subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "referral_reward" ADD CONSTRAINT "referral_reward_referrer_subscriber_id_subscriber_id_fk" FOREIGN KEY ("referrer_subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "referral_reward" ADD CONSTRAINT "referral_reward_payment_id_payment_id_fk" FOREIGN KEY ("payment_id") REFERENCES "public"."payment"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription_activation" ADD CONSTRAINT "subscription_activation_subscription_id_subscription_id_fk" FOREIGN KEY ("subscription_id") REFERENCES "public"."subscription"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription_activation" ADD CONSTRAINT "subscription_activation_payment_id_payment_id_fk" FOREIGN KEY ("payment_id") REFERENCES "public"."payment"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription_activation" ADD CONSTRAINT "subscription_activation_plan_id_plan_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."plan"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -523,6 +791,20 @@ ALTER TABLE "abuse_action" ADD CONSTRAINT "abuse_action_subscription_id_subscrip
 ALTER TABLE "abuse_signal" ADD CONSTRAINT "abuse_signal_subscription_id_subscription_id_fk" FOREIGN KEY ("subscription_id") REFERENCES "public"."subscription"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "abuse_signal" ADD CONSTRAINT "abuse_signal_node_id_node_id_fk" FOREIGN KEY ("node_id") REFERENCES "public"."node"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "torrent_ban" ADD CONSTRAINT "torrent_ban_node_id_node_id_fk" FOREIGN KEY ("node_id") REFERENCES "public"."node"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ai_suggestion" ADD CONSTRAINT "ai_suggestion_conversation_id_conversation_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversation"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "ai_suggestion" ADD CONSTRAINT "ai_suggestion_message_id_message_id_fk" FOREIGN KEY ("message_id") REFERENCES "public"."message"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "conversation" ADD CONSTRAINT "conversation_contact_id_support_contact_id_fk" FOREIGN KEY ("contact_id") REFERENCES "public"."support_contact"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "conversation" ADD CONSTRAINT "conversation_assignee_user_id_user_id_fk" FOREIGN KEY ("assignee_user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "message" ADD CONSTRAINT "message_conversation_id_conversation_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversation"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "message" ADD CONSTRAINT "message_sender_user_id_user_id_fk" FOREIGN KEY ("sender_user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "support_contact" ADD CONSTRAINT "support_contact_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "broadcast" ADD CONSTRAINT "broadcast_segment_id_segment_id_fk" FOREIGN KEY ("segment_id") REFERENCES "public"."segment"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "broadcast_recipient" ADD CONSTRAINT "broadcast_recipient_broadcast_id_broadcast_id_fk" FOREIGN KEY ("broadcast_id") REFERENCES "public"."broadcast"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "broadcast_recipient" ADD CONSTRAINT "broadcast_recipient_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "campaign_event" ADD CONSTRAINT "campaign_event_campaign_link_id_campaign_link_id_fk" FOREIGN KEY ("campaign_link_id") REFERENCES "public"."campaign_link"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "campaign_event" ADD CONSTRAINT "campaign_event_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "campaign_link" ADD CONSTRAINT "campaign_link_campaign_id_campaign_id_fk" FOREIGN KEY ("campaign_id") REFERENCES "public"."campaign"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "message_log" ADD CONSTRAINT "message_log_subscriber_id_subscriber_id_fk" FOREIGN KEY ("subscriber_id") REFERENCES "public"."subscriber"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "api_token_hash_uq" ON "api_token" USING btree ("token_hash");--> statement-breakpoint
 CREATE UNIQUE INDEX "organization_slug_uq" ON "organization" USING btree ("slug");--> statement-breakpoint
 CREATE UNIQUE INDEX "user_org_email_uq" ON "user" USING btree ("org_id","email");--> statement-breakpoint
@@ -540,12 +822,33 @@ CREATE UNIQUE INDEX "routing_domain_list_uq" ON "routing_domain_list" USING btre
 CREATE UNIQUE INDEX "sub_snapshot_uq" ON "subscription_config_snapshot" USING btree ("subscription_id","config_version","list_version");--> statement-breakpoint
 CREATE UNIQUE INDEX "traffic_report_uq" ON "traffic_report" USING btree ("node_id","report_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "traffic_sample_uq" ON "traffic_sample" USING btree ("node_id","subject_type","subject_key","window_start");--> statement-breakpoint
+CREATE INDEX "external_api_log_provider_idx" ON "external_api_log" USING btree ("provider","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "infra_payment_uq" ON "infra_payment" USING btree ("resource_id","period_start");--> statement-breakpoint
 CREATE UNIQUE INDEX "ledger_idempotency_uq" ON "ledger_entry" USING btree ("idempotency_key");--> statement-breakpoint
+CREATE INDEX "ledger_subscriber_idx" ON "ledger_entry" USING btree ("subscriber_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "payment_provider_uq" ON "payment" USING btree ("org_id","provider","provider_payment_id");--> statement-breakpoint
+CREATE INDEX "payment_subscriber_idx" ON "payment" USING btree ("subscriber_id","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "payment_gift_token_uq" ON "payment" USING btree ("gift_token");--> statement-breakpoint
+CREATE UNIQUE INDEX "payment_merchant_org_alias_uq" ON "payment_merchant" USING btree ("org_id","alias");--> statement-breakpoint
 CREATE UNIQUE INDEX "plan_org_code_uq" ON "plan" USING btree ("org_id","code");--> statement-breakpoint
 CREATE UNIQUE INDEX "promo_code_uq" ON "promo_code" USING btree ("org_id","code");--> statement-breakpoint
+CREATE UNIQUE INDEX "promo_redemption_uq" ON "promo_redemption" USING btree ("promo_code_id","subscriber_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "referral_uq" ON "referral" USING btree ("referred_subscriber_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "referral_reward_payment_uq" ON "referral_reward" USING btree ("payment_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "sub_activation_payment_uq" ON "subscription_activation" USING btree ("payment_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "abuse_action_idempotency_uq" ON "abuse_action" USING btree ("idempotency_key");--> statement-breakpoint
-CREATE UNIQUE INDEX "torrent_ban_uq" ON "torrent_ban" USING btree ("node_id","ip","banned_at");
+CREATE UNIQUE INDEX "torrent_ban_uq" ON "torrent_ban" USING btree ("node_id","ip","banned_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "ai_suggestion_idempotency_uq" ON "ai_suggestion" USING btree ("idempotency_key");--> statement-breakpoint
+CREATE INDEX "conversation_status_idx" ON "conversation" USING btree ("org_id","status","last_message_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "message_tg_update_uq" ON "message" USING btree ("telegram_update_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "message_dedup_uq" ON "message" USING btree ("dedup_key");--> statement-breakpoint
+CREATE INDEX "message_conversation_idx" ON "message" USING btree ("conversation_id","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "support_contact_uq" ON "support_contact" USING btree ("org_id","telegram_user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "bot_event_update_uq" ON "bot_event" USING btree ("update_id");--> statement-breakpoint
+CREATE INDEX "bot_event_type_idx" ON "bot_event" USING btree ("org_id","event","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "broadcast_recipient_uq" ON "broadcast_recipient" USING btree ("broadcast_id","subscriber_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "campaign_slug_uq" ON "campaign" USING btree ("org_id","slug");--> statement-breakpoint
+CREATE INDEX "campaign_event_link_idx" ON "campaign_event" USING btree ("campaign_link_id","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "campaign_link_code_uq" ON "campaign_link" USING btree ("code");--> statement-breakpoint
+CREATE UNIQUE INDEX "message_log_dedup_uq" ON "message_log" USING btree ("dedup_key");--> statement-breakpoint
+CREATE INDEX "message_log_subscriber_idx" ON "message_log" USING btree ("subscriber_id","created_at");
