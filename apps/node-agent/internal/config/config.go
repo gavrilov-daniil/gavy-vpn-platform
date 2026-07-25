@@ -27,8 +27,16 @@ type Config struct {
 	// NodeID is part of every request path (/internal/agent/nodes/<id>/...) and
 	// AgentToken goes into the x-agent-token header — together they are the whole
 	// authentication of the agent today.
+	//
+	// AgentToken здесь — ПЕРЕХОДНЫЙ общий секрет парка. Постоянный per-node токен
+	// выдаётся при энроллменте и живёт в state_dir/identity.json (см. Identity),
+	// а не в этом конфиге: конфиг раскатывает оператор, identity выдаёт сервер.
 	NodeID     string
 	AgentToken string
+
+	// BootstrapToken — одноразовый токен энроллмента, выпущенный админкой. Нужен
+	// ровно один раз: агент меняет его на per-node токен и больше не читает.
+	BootstrapToken string
 
 	// mTLS-идентичность агента. Опциональна: control-plane пока не выпускает
 	// клиентские сертификаты, и с пустыми путями агент ходит обычным HTTPS.
@@ -70,6 +78,7 @@ type fileConfig struct {
 	ControlPlaneURL       string `json:"control_plane_url"`
 	NodeID                string `json:"node_id"`
 	AgentToken            string `json:"agent_token"`
+	BootstrapToken        string `json:"bootstrap_token"`
 	ClientCertPath        string `json:"client_cert_path"`
 	ClientKeyPath         string `json:"client_key_path"`
 	CPPublicKeyPath       string `json:"cp_public_key_path"`
@@ -116,6 +125,7 @@ func Load(path string) (*Config, error) {
 		ControlPlaneURL:       fc.ControlPlaneURL,
 		NodeID:                fc.NodeID,
 		AgentToken:            fc.AgentToken,
+		BootstrapToken:        fc.BootstrapToken,
 		ClientCertPath:        fc.ClientCertPath,
 		ClientKeyPath:         fc.ClientKeyPath,
 		CPPublicKeyPath:       fc.CPPublicKeyPath,
@@ -139,6 +149,7 @@ func applyEnv(fc *fileConfig) {
 	fc.ControlPlaneURL = envOr("NODE_AGENT_CONTROL_PLANE_URL", fc.ControlPlaneURL)
 	fc.NodeID = envOr("NODE_AGENT_NODE_ID", fc.NodeID)
 	fc.AgentToken = envOr("NODE_AGENT_AGENT_TOKEN", fc.AgentToken)
+	fc.BootstrapToken = envOr("NODE_AGENT_BOOTSTRAP_TOKEN", fc.BootstrapToken)
 	fc.ClientCertPath = envOr("NODE_AGENT_CLIENT_CERT_PATH", fc.ClientCertPath)
 	fc.ClientKeyPath = envOr("NODE_AGENT_CLIENT_KEY_PATH", fc.ClientKeyPath)
 	fc.CPPublicKeyPath = envOr("NODE_AGENT_CP_PUBLIC_KEY_PATH", fc.CPPublicKeyPath)
@@ -163,7 +174,6 @@ func (c *Config) validate() error {
 	required := map[string]string{
 		"control_plane_url":        c.ControlPlaneURL,
 		"node_id":                  c.NodeID,
-		"agent_token":              c.AgentToken,
 		"xray_config_path":         c.XrayConfigPath,
 		"reality_private_key_path": c.RealityPrivateKeyPath,
 		"state_dir":                c.StateDir,

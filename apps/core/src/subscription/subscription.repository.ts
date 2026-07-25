@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import type { ChannelInput, DomainList, FrontOutbound, GeneratorInput, ProfileInput } from "@vpn/xray-config";
 import { DB } from "../db/db.module.js";
@@ -8,6 +8,15 @@ export interface SubscriptionBundle {
   subscription: typeof schema.subscription.$inferSelect;
   input: GeneratorInput;
   profiles: ProfileInput[];
+}
+
+/** Что Happ присылает о себе заголовками x-hwid / x-device-os / x-ver-os / x-device-model. */
+export interface DeviceInfo {
+  hwid: string;
+  deviceOs?: string;
+  osVer?: string;
+  deviceModel?: string;
+  userAgent?: string;
 }
 
 @Injectable()
@@ -47,6 +56,73 @@ export class SubscriptionRepository {
       .where(and(eq(schema.subscription.orgId, orgId), eq(schema.subscription.id, id)))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /**
+   * Отметка посещения: один UPDATE на выдачу. Без неё оператор не видит, ходит ли
+   * клиент вообще, — в схеме поля были, а писать их было некому.
+   */
+  async markVisit(subscriptionId: string, userAgent: string): Promise<void> {
+    const now = new Date();
+    await this.db
+      .update(schema.subscription)
+      .set({ subLastUserAgent: userAgent.slice(0, 256), subLastOpenedAt: now, onlineAt: now })
+      .where(eq(schema.subscription.id, subscriptionId));
+  }
+
+  /**
+   * Регистрация устройства при обращении к подписке. Идемпотентность — на unique
+   * (subscription_id, hwid): повтор обновляет last_seen_at, а не плодит строки
+   * и не ловит 23505 на гонке двух параллельных опросов одного клиента.
+   */
+  async touchDevice(orgId: string, subscriptionId: string, device: DeviceInfo): Promise<void> {
+    const now = new Date();
+    await this.db
+      .insert(schema.subscriberDevice)
+      .values({
+        orgId,
+        subscriptionId,
+        hwid: device.hwid,
+        deviceOs: device.deviceOs,
+        osVer: device.osVer,
+        deviceModel: device.deviceModel,
+        userAgent: device.userAgent,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [schema.subscriberDevice.subscriptionId, schema.subscriberDevice.hwid],
+        // undefined-поля drizzle в SET не кладёт: клиент, переставший слать x-device-os,
+        // не должен затирать то, что мы о нём уже знаем
+        set: {
+          lastSeenAt: now,
+          deviceOs: device.deviceOs,
+          osVer: device.osVer,
+          deviceModel: device.deviceModel,
+          userAgent: device.userAgent,
+        },
+      });
+  }
+
+  /**
+   * Устройства, виденные внутри окна, в порядке появления.
+   * Окно нужно, чтобы юзер, сменивший три телефона за год, не упирался в лимит
+   * при одном живом устройстве. Второй ключ сортировки — hwid: у двух устройств,
+   * заведённых в одну миллисекунду, порядок должен быть детерминированным,
+   * иначе слот прыгал бы между ними от запроса к запросу.
+   */
+  async activeDeviceHwids(subscriptionId: string, since: Date): Promise<string[]> {
+    const rows = await this.db
+      .select({ hwid: schema.subscriberDevice.hwid })
+      .from(schema.subscriberDevice)
+      .where(
+        and(
+          eq(schema.subscriberDevice.subscriptionId, subscriptionId),
+          gte(schema.subscriberDevice.lastSeenAt, since),
+        ),
+      )
+      .orderBy(asc(schema.subscriberDevice.firstSeenAt), asc(schema.subscriberDevice.hwid));
+    return rows.map((r) => r.hwid);
   }
 
   /** Собирает вход генератора: каналы+хосты, профили+tier'ы, front, список РФ-доменов. */

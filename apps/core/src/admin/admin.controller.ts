@@ -80,6 +80,10 @@ export class AdminController {
       devicesUsed: Number(devices ?? 0),
       balanceKopeks: Number(balance ?? 0),
       onlineAt: sub.onlineAt,
+      // отметки выдачи: видно, ходит ли клиент за конфигом и чем именно
+      lastOpenedAt: sub.subLastOpenedAt,
+      lastUserAgent: sub.subLastUserAgent,
+      revokedAt: sub.subRevokedAt,
       createdAt: sub.createdAt,
     }));
   }

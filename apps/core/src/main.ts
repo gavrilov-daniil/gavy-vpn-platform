@@ -78,6 +78,14 @@ async function bootstrap() {
   if (!cfg.serviceToken) {
     log.error("SERVICE_TOKEN не задан: любой запрос к /internal/* получит 401");
   }
+  // Общий токен парка — переходный режим до энроллмента всех нод: он даёт доступ
+  // к desired-state ЛЮБОЙ ноды, поэтому изъятие одной ноды вскрывает весь парк.
+  if (cfg.agentToken) {
+    log.warn(
+      "AGENT_TOKEN задан: общий токен парка принимается от нод БЕЗ энроллмента (переходный режим). " +
+        "Проведите ноды через POST /api/admin/nodes/:id/enrollment и уберите переменную",
+    );
+  }
 
   // rawBody нужен для проверки подписей вебхуков по сырым байтам тела
   const app = await NestFactory.create(AppModule, { rawBody: true });

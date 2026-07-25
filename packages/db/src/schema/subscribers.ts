@@ -75,4 +75,8 @@ export const subscriberDevice = pgTable("subscriber_device", {
   userAgent: text("user_agent"),
   firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex("subscriber_device_sub_hwid_uq").on(t.subscriptionId, t.hwid)]);
+}, (t) => [
+  uniqueIndex("subscriber_device_sub_hwid_uq").on(t.subscriptionId, t.hwid),
+  // энфорсмент лимита на каждой выдаче: устройства подписки, виденные за окно
+  index("subscriber_device_sub_last_seen_idx").on(t.subscriptionId, t.lastSeenAt.desc()),
+]);

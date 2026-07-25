@@ -1,11 +1,12 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { LedgerService } from "../payments/ledger.service.js";
 import { AttributionService } from "../crm/attribution.service.js";
+import { NodeStateService } from "../nodes/node-state.service.js";
 
 /** Неугадываемый идентификатор подписки в публичном URL. */
 function generateShortUuid(): string {
@@ -24,6 +25,7 @@ export class SubscribersService {
     @Inject(DB) private readonly db: Database,
     private readonly ledger: LedgerService,
     private readonly attribution: AttributionService,
+    private readonly nodes: NodeStateService,
   ) {}
 
   /**
@@ -157,10 +159,18 @@ export class SubscribersService {
   async overview(subscriberId: string) {
     const subscription = await this.ensureSubscription(subscriberId);
     const balance = await this.ledger.getBalance(subscriberId);
+    // Считаем ровно те устройства, что занимают слоты на выдаче (окно активности),
+    // иначе бот показал бы «3 из 2» из-за давно забытого телефона.
+    const activeSince = new Date(Date.now() - this.cfg.hwidActiveWindowDays * 86_400_000);
     const devices = await this.db
       .select({ count: sql<string>`count(*)` })
       .from(schema.subscriberDevice)
-      .where(eq(schema.subscriberDevice.subscriptionId, subscription.id));
+      .where(
+        and(
+          eq(schema.subscriberDevice.subscriptionId, subscription.id),
+          gte(schema.subscriberDevice.lastSeenAt, activeSince),
+        ),
+      );
 
     const [lastPayment] = await this.db
       .select()
@@ -319,6 +329,99 @@ export class SubscribersService {
 
     this.log.log(`триал выдан подписчику ${subscriberId} до ${expireAt.toISOString()}`);
     return { ok: true, expireAt, subscriptionUrl: `https://${this.cfg.subPublicHost}/auto/${subscription.shortUuid}` };
+  }
+
+  /** Устройства подписки — карточка подписчика в админке и разбор «почему лимит». */
+  async listDevices(subscriptionId: string) {
+    await this.getSubscription(subscriptionId);
+    return this.db
+      .select()
+      .from(schema.subscriberDevice)
+      .where(eq(schema.subscriberDevice.subscriptionId, subscriptionId))
+      .orderBy(schema.subscriberDevice.firstSeenAt);
+  }
+
+  /**
+   * Отвязка устройства: слот освобождается сразу, следующий опрос клиента
+   * заводит запись заново. Повторный вызов — те же ноль строк, это не ошибка.
+   */
+  async unlinkDevice(subscriptionId: string, hwid: string) {
+    await this.getSubscription(subscriptionId);
+    const removed = await this.db
+      .delete(schema.subscriberDevice)
+      .where(
+        and(
+          eq(schema.subscriberDevice.subscriptionId, subscriptionId),
+          eq(schema.subscriberDevice.hwid, hwid),
+        ),
+      )
+      .returning({ id: schema.subscriberDevice.id });
+    this.log.log(`подписка ${subscriptionId}: отвязано устройство ${hwid.slice(0, 16)} (${removed.length})`);
+    return { ok: true, removed: removed.length };
+  }
+
+  /**
+   * Revoke — штатный ответ на утечку ссылки: старый URL перестаёт работать.
+   * Меняем оба секрета сразу. Только short_uuid недостаточно: vless_uuid из утёкшего
+   * тела подписки — это рабочая идентичность на нодах, по ней воруют трафик.
+   *
+   * Идемпотентности здесь нет и быть не может: каждый вызов — новая пара секретов.
+   * Повторный revoke не ломает данные, но выданный юзеру URL снова протухает.
+   */
+  async revoke(subscriptionId: string) {
+    const revokedAt = new Date();
+    const shortUuid = generateShortUuid();
+
+    const updated = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(schema.subscription)
+        .set({ shortUuid, vlessUuid: randomUUID(), subRevokedAt: revokedAt, updatedAt: revokedAt })
+        .where(
+          and(
+            eq(schema.subscription.orgId, this.cfg.defaultOrgId),
+            eq(schema.subscription.id, subscriptionId),
+          ),
+        )
+        .returning();
+      if (!row) throw new NotFoundException("подписка не найдена");
+
+      // Устройства принадлежали утёкшей ссылке: оставить их — значит отдать
+      // слоты лимита тому, у кого ссылка и осталась.
+      await tx
+        .delete(schema.subscriberDevice)
+        .where(eq(schema.subscriberDevice.subscriptionId, subscriptionId));
+      return row;
+    });
+
+    // vless_uuid — идентичность клиента в конфиге ноды. Без пересборки desired-state
+    // ноды продолжают знать старый uuid, и новый конфиг у клиента не заработает.
+    const rebuild = await this.nodes.rebuildAll();
+    this.log.warn(`подписка ${subscriptionId}: revoke, новый short_uuid ${shortUuid}, нод пересобрано ${rebuild.changed.length}`);
+
+    return {
+      ok: true,
+      subscriptionId,
+      shortUuid: updated.shortUuid,
+      subscriptionUrl: `https://${this.cfg.subPublicHost}/auto/${updated.shortUuid}`,
+      revokedAt,
+      nodesChanged: rebuild.changed.length,
+      nodesFailed: rebuild.failed.length,
+    };
+  }
+
+  private async getSubscription(subscriptionId: string) {
+    const [row] = await this.db
+      .select()
+      .from(schema.subscription)
+      .where(
+        and(
+          eq(schema.subscription.orgId, this.cfg.defaultOrgId),
+          eq(schema.subscription.id, subscriptionId),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException("подписка не найдена");
+    return row;
   }
 
   async getById(subscriberId: string) {

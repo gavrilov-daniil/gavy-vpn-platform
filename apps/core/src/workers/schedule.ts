@@ -15,6 +15,8 @@ export const SCHEDULE: Record<JobName, string> = {
   "subscription-notify-expire": "13 10 * * *",
   "infra-renewal-reminder": "41 10 * * *",
   "payment-reconcile": "19,49 * * * *",
+  "abuse-scan": "37 */2 * * *",
+  "maintenance": "51 4 * * *",
 };
 
 /** Стабильный id планировщика: при рестарте расписание перезаписывается, а не плодится. */

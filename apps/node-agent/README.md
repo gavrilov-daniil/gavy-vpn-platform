@@ -28,12 +28,14 @@
 
 ## API control-plane
 
-Все запросы несут заголовок `x-agent-token: <agent_token>`; `nodeId` берётся из
-конфига агента.
+Все запросы, кроме энроллмента, несут заголовок `x-agent-token: <per-node токен>`;
+`nodeId` берётся из конфига агента. Токен проверяется **по конкретной ноде**: токен
+одной ноды не открывает desired-state другой.
 
 | Метод | Путь | Тело / ответ |
 |---|---|---|
-| GET | `/internal/agent/nodes/{nodeId}/desired-state` | ответ: `{version, configHash, config, users, generatedAt}` |
+| POST | `/internal/agent/enroll` | тело: `{nodeId, bootstrapToken, realityPublicKey, shortIds, agentVersion}` → `{nodeId, agentToken, agentEpoch}`; **без** `x-agent-token` |
+| GET | `/internal/agent/nodes/{nodeId}/desired-state` | ответ: `{version, configHash, config, users, generatedAt}` или конверт `{payload, signature}` |
 | POST | `/internal/agent/nodes/{nodeId}/report` | тело: `{appliedConfigHash, agentVersion, xrayVersion, sysStats}` → `{ok:true}` |
 | POST | `/internal/agent/nodes/{nodeId}/stats` | тело: `{reportId, deltas[]}` → `{accepted, applied}` |
 
@@ -56,14 +58,35 @@ upDelta, downDelta, windowStart, windowEnd}`. Имена счётчиков Xray
 `accepted: false` — **не ошибка**: этот `reportId` control-plane уже принимал.
 Батч дропается из буфера, ретрай запрещён — он вернёт то же самое.
 
+## Энроллмент
+
+Первый запуск ноды: оператор выпускает одноразовый bootstrap-токен в админке
+(`POST /api/admin/nodes/:id/enrollment`) и кладёт его в `bootstrap_token`. Агент
+меняет его на постоянный per-node токен и сохраняет в `state_dir/identity.json`
+(права 0600) — дальше конфиг для аутентификации не нужен вовсе.
+
+- Reality-ключ генерится/импортируется **до** энроллмента: наружу уезжает только
+  публичная половина и shortIds — из них панель собирает `pbk=`/`sid=` клиентских
+  строк. Приватник не покидает ноду никогда.
+- `agent_epoch` приходит от control-plane и растёт на каждом энроллменте:
+  переналитая нода не сталкивается `report_id` с прошлой инкарнацией.
+- Bootstrap одноразовый. После успешного обмена агент забывает его в памяти и
+  просит удалить из конфига; повторный энроллмент тем же токеном сервер отклонит.
+- Есть `identity.json` — `bootstrap_token` игнорируется (нода уже заэнроллена).
+  Identity от другой ноды в `state_dir` — жёсткая ошибка запуска, а не тихая работа
+  с чужим токеном.
+- `agent_token` в конфиге остаётся переходным общим секретом парка: он действует,
+  только пока нода не прошла энроллмент.
+
 ## Подпись и mTLS (оба опциональны)
 
 - **mTLS.** Заданы `client_cert_path` и `client_key_path` — агент ходит с
   клиентским сертификатом (и требует TLS 1.3). Пустые — обычный HTTPS
   (нижняя граница TLS 1.2). Аутентификация в обоих случаях — `x-agent-token`.
   Пути задаются только вместе: половина mTLS — ошибка конфига.
-- **Подпись desired-state.** Механизм — root of trust агента, но control-plane
-  пока не подписывает и отдаёт голый JSON. Правило анти-даунгрейда:
+- **Подпись desired-state.** Root of trust агента. Control-plane подписывает, если
+  у него задан `DESIRED_STATE_SIGNING_KEY`; иначе отдаёт голый JSON. Правило
+  анти-даунгрейда:
   - пришёл конверт `{payload, signature}` → подпись проверяется всегда;
   - пришёл голый JSON → принимается, **только если** `cp_public_key_path` пуст;
   - ключ задан, подписи нет → ошибка (иначе подпись снималась бы удалением поля);
@@ -95,7 +118,8 @@ Reality public key вшит в строку подключения каждог�
 {
   "control_plane_url": "https://cp.example.net",
   "node_id": "00000000-0000-0000-0000-000000000000",
-  "agent_token": "<общий секрет, тот же что AGENT_TOKEN в core>",
+  "agent_token": "<переходный общий секрет, тот же что AGENT_TOKEN в core>",
+  "bootstrap_token": "<одноразовый токен энроллмента, после первого запуска удалить>",
   "client_cert_path": "",
   "client_key_path": "",
   "cp_public_key_path": "",
@@ -110,8 +134,10 @@ Reality public key вшит в строку подключения каждог�
 }
 ```
 
-Обязательные: `control_plane_url`, `node_id`, `agent_token`, `xray_config_path`,
-`reality_private_key_path`, `state_dir`.
+Обязательные: `control_plane_url`, `node_id`, `xray_config_path`,
+`reality_private_key_path`, `state_dir`. Плюс любой источник токена: `bootstrap_token`
+(энроллмент), `agent_token` (переходный общий) или уже сохранённый
+`state_dir/identity.json`. Без них агент не стартует.
 
 Любое поле переопределяется env-переменной `NODE_AGENT_<UPPER_SNAKE>`
 (напр. `NODE_AGENT_CONTROL_PLANE_URL`, `NODE_AGENT_AGENT_TOKEN`). Уровень логов —
@@ -159,6 +185,6 @@ systemd-хардненинг — в `systemd/node-agent.service`. Агент з�
   говорящим по gRPC-протоколу (`statsclient_test.go`).
 - Буфер stats — snapshot-перезапись файла (корректно, но не оптимально).
   TODO(M2): append-only log + компакция, fsync перед rename.
-- **Bootstrap-хендшейка нет.** На сервере нет эндпоинта регистрации: `node_id`,
-  `agent_token` и `agent_epoch` кладутся в конфиг при раскатке ноды. TODO: выдача
-  identity и mTLS-сертификата одноразовым токеном.
+- **mTLS-сертификат при энроллменте не выдаётся.** Обмен даёт токен и эпоху;
+  клиентские сертификаты control-plane не выпускает и не проверяет, поля
+  `agent_pubkey`/`cert_fingerprint` в панели остаются пустыми.

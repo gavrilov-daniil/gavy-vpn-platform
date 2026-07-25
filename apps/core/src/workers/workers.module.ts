@@ -17,6 +17,8 @@ import { NodeReconcileSweepJob } from "./jobs/node-reconcile-sweep.job.js";
 import { TouchpointsRunJob } from "./jobs/touchpoints-run.job.js";
 import { BroadcastResumeJob } from "./jobs/broadcast-resume.job.js";
 import { PaymentReconcileJob } from "./jobs/payment-reconcile.job.js";
+import { AbuseScanJob } from "./jobs/abuse-scan.job.js";
+import { MaintenanceJob } from "./jobs/maintenance.job.js";
 
 @Module({
   imports: [
@@ -39,6 +41,8 @@ import { PaymentReconcileJob } from "./jobs/payment-reconcile.job.js";
     TouchpointsRunJob,
     BroadcastResumeJob,
     PaymentReconcileJob,
+    AbuseScanJob,
+    MaintenanceJob,
     JobRegistry,
   ],
   exports: [QueueService, SchedulerService, JobRegistry],

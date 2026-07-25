@@ -4,8 +4,9 @@
 // node. This means a node only needs outbound 443 — no inbound management port,
 // no public API surface on the node itself.
 //
-// Authentication is a shared secret in the x-agent-token header. mTLS is
-// supported but optional (see New).
+// Authentication is a per-node secret in the x-agent-token header, obtained by
+// trading a one-shot bootstrap token via Enroll. mTLS is supported but optional
+// (see New).
 package controlplane
 
 import (
@@ -94,6 +95,26 @@ type statsAck struct {
 	Applied  int  `json:"applied"`
 }
 
+// EnrollRequest trades a one-shot bootstrap token for this node's permanent
+// per-node agent token.
+//
+// RealityPublicKey is the PUBLIC half only — the private key never leaves the
+// node. The control plane needs it (plus the shortIds) to build client configs:
+// pbk= and sid= in every connection string come from here.
+type EnrollRequest struct {
+	NodeID           string   `json:"nodeId"`
+	BootstrapToken   string   `json:"bootstrapToken"`
+	RealityPublicKey string   `json:"realityPublicKey"`
+	ShortIDs         []string `json:"shortIds"`
+	AgentVersion     string   `json:"agentVersion"`
+}
+
+type EnrollResponse struct {
+	NodeID     string `json:"nodeId"`
+	AgentToken string `json:"agentToken"`
+	AgentEpoch int64  `json:"agentEpoch"`
+}
+
 type Client struct {
 	baseURL string
 	nodeID  string
@@ -152,6 +173,42 @@ func New(opts Options) (*Client, error) {
 		httpc:   httpc,
 		cpPub:   pub,
 	}, nil
+}
+
+// UseToken switches the client to a new agent token (after enrollment). The
+// client is used from a single goroutine (the reconcile loop starts later), so
+// no locking here.
+func (c *Client) UseToken(token string) { c.token = token }
+
+// Enroll exchanges the one-shot bootstrap token for a per-node agent token.
+//
+// This is the ONLY call that goes out without x-agent-token: at this point the
+// node has no token yet, and the bootstrap token in the body is what
+// authenticates it. It is single-use server-side, so a second call with the same
+// token fails — that is the point, and the caller must not retry it blindly.
+func (c *Client) Enroll(ctx context.Context, req EnrollRequest) (*EnrollResponse, error) {
+	if req.BootstrapToken == "" {
+		return nil, fmt.Errorf("controlplane: enroll without bootstrap token")
+	}
+	if req.ShortIDs == nil {
+		req.ShortIDs = []string{}
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: encode enroll: %w", err)
+	}
+	body, err := c.doAuth(ctx, http.MethodPost, "/internal/agent/enroll", payload, "")
+	if err != nil {
+		return nil, err
+	}
+	var res EnrollResponse
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("controlplane: decode enroll response: %w", err)
+	}
+	if res.AgentToken == "" {
+		return nil, fmt.Errorf("controlplane: enroll response without agentToken")
+	}
+	return &res, nil
 }
 
 // VerifySignature verifies an RS256 (RSASSA-PKCS1-v1_5 + SHA-256) signature over
@@ -333,6 +390,13 @@ func (c *Client) nodePath(suffix string) string {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return c.doAuth(ctx, method, path, body, c.token)
+}
+
+// doAuth sends the request with an explicit token; an empty token means no
+// x-agent-token header at all (enrollment, which authenticates by bootstrap
+// token in the body).
+func (c *Client) doAuth(ctx context.Context, method, path string, body []byte, token string) ([]byte, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
@@ -345,7 +409,9 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("x-agent-token", c.token)
+	if token != "" {
+		req.Header.Set("x-agent-token", token)
+	}
 
 	resp, err := c.httpc.Do(req)
 	if err != nil {

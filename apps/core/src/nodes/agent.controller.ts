@@ -1,36 +1,47 @@
-import { Body, Controller, Get, Headers, Param, Post, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 import { NodeStateService } from "./node-state.service.js";
 import { CascadeService } from "./cascade.service.js";
 import { StatsService, type StatsBatch } from "./stats.service.js";
-import { loadConfig } from "../config.js";
+import { NodeIdentityService, type EnrollInput } from "./node-identity.service.js";
+import { DesiredStateSigner } from "./desired-state.signer.js";
 
 /**
  * API для node-agent. Агент ходит СЮДА сам (dial-out): ноде нужен только исходящий 443,
  * входящий control-порт на ноде не открывается, и панель не обязана знать её адрес.
  * Если панель лежит — агент продолжает крутить последний конфиг и копит статистику.
+ *
+ * Аутентификация — per-node токен в x-agent-token, выданный при энроллменте
+ * (NodeIdentityService). Исключение — сам /enroll: его защищает одноразовый
+ * bootstrap-токен в теле.
  */
 @Controller("internal/agent")
 export class AgentController {
-  private readonly cfg = loadConfig();
-
   constructor(
     private readonly state: NodeStateService,
     private readonly cascades: CascadeService,
     private readonly stats: StatsService,
+    private readonly identity: NodeIdentityService,
+    private readonly signer: DesiredStateSigner,
   ) {}
+
+  /** Обмен одноразового bootstrap-токена на постоянный per-node. Вызывается один раз за инкарнацию ноды. */
+  @Post("enroll")
+  enroll(@Body() body: EnrollInput) {
+    return this.identity.enroll(body ?? {});
+  }
 
   /** Полная декларация желаемого состояния. Агент сверяет config_hash и применяет только при отличии. */
   @Get("nodes/:nodeId/desired-state")
   async desiredState(@Param("nodeId") nodeId: string, @Headers("x-agent-token") token: string) {
-    this.assertToken(token);
+    await this.identity.assertAgent(nodeId, token);
     const state = await this.state.getDesiredState(nodeId);
-    return {
+    return this.signer.wrap({
       version: state.version,
       configHash: state.configHash,
       config: state.config,
       users: state.users,
       generatedAt: state.generatedAt,
-    };
+    });
   }
 
   @Post("nodes/:nodeId/report")
@@ -46,7 +57,7 @@ export class AgentController {
       egressHealth?: Record<string, unknown>;
     },
   ) {
-    this.assertToken(token);
+    await this.identity.assertAgent(nodeId, token);
     const result = await this.state.report(nodeId, body);
 
     // Статус каскада обязан быть непрерывной функцией от сходимости обеих нод, а не защёлкой
@@ -66,14 +77,7 @@ export class AgentController {
     @Headers("x-agent-token") token: string,
     @Body() body: StatsBatch,
   ) {
-    this.assertToken(token);
+    await this.identity.assertAgent(nodeId, token);
     return this.stats.ingest(nodeId, body);
-  }
-
-  private assertToken(token: string | undefined) {
-    // MVP-аутентификация агента. Полноценный mTLS + подпись desired-state — следующий шаг.
-    if (!this.cfg.agentToken || token !== this.cfg.agentToken) {
-      throw new UnauthorizedException("невалидный agent token");
-    }
   }
 }

@@ -48,10 +48,21 @@ func run(configPath string, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	ident, err := config.LoadIdentity(cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	// Чужая identity в state_dir — это склеенные ноды: агент ходил бы под токеном
+	// одной ноды по путям другой и получал 401 на каждом цикле.
+	if ident != nil && ident.NodeID != cfg.NodeID {
+		return fmt.Errorf("identity in %s belongs to node %s, config says %s",
+			config.IdentityPath(cfg.StateDir), ident.NodeID, cfg.NodeID)
+	}
+
 	cp, err := controlplane.New(controlplane.Options{
 		BaseURL:         cfg.ControlPlaneURL,
 		NodeID:          cfg.NodeID,
-		AgentToken:      cfg.AgentToken,
+		AgentToken:      effectiveToken(cfg, ident),
 		ClientCertPath:  cfg.ClientCertPath,
 		ClientKeyPath:   cfg.ClientKeyPath,
 		CPPublicKeyPath: cfg.CPPublicKeyPath,
@@ -64,6 +75,8 @@ func run(configPath string, logger *slog.Logger) error {
 
 	// Ensure the Reality keypair before anything else. Idempotent, and in import
 	// mode it refuses to run when the migrated key is missing (never rotates pbk).
+	// Ключ обязан существовать ДО энроллмента: его публичную половину мы там и
+	// отправляем, а приватную не отправляем никогда.
 	keys, err := xr.EnsureRealityKeypair(cfg.RealityKeypairMode)
 	if err != nil {
 		return fmt.Errorf("ensure reality keypair: %w", err)
@@ -73,7 +86,15 @@ func run(configPath string, logger *slog.Logger) error {
 		"public_key", keys.PublicKeyBase64,
 		"short_ids", keys.ShortIDs)
 
-	sb, err := stats.New(filepath.Join(cfg.StateDir, "stats-buffer.json"), agentEpochOrFallback(cfg))
+	ident, err = enrollIfNeeded(ctx, cfg, ident, cp, keys, logger)
+	if err != nil {
+		return err
+	}
+	if effectiveToken(cfg, ident) == "" {
+		return fmt.Errorf("no agent credentials: set bootstrap_token (enrollment) or agent_token (transitional shared secret)")
+	}
+
+	sb, err := stats.New(filepath.Join(cfg.StateDir, "stats-buffer.json"), agentEpochOrFallback(cfg, ident))
 	if err != nil {
 		return fmt.Errorf("init stats buffer: %w", err)
 	}
@@ -92,10 +113,83 @@ func run(configPath string, logger *slog.Logger) error {
 	return nil
 }
 
+// effectiveToken picks the credential the agent authenticates with. The enrolled
+// per-node token always wins over the shared AGENT_TOKEN: the shared secret is a
+// transitional fallback for nodes that have not enrolled yet, and the control
+// plane stops accepting it for a node once that node has its own token.
+func effectiveToken(cfg *config.Config, ident *config.Identity) string {
+	if ident != nil && ident.AgentToken != "" {
+		return ident.AgentToken
+	}
+	return cfg.AgentToken
+}
+
+// enrollIfNeeded performs the one-time bootstrap handshake: bootstrap token in,
+// per-node token out, persisted to state_dir with 0600.
+//
+// Порядок «сначала на диск, потом в работу» здесь обязателен: bootstrap-токен
+// одноразовый, и если выданный per-node токен не переживёт рестарт, повторно
+// заэнроллиться будет нечем — нода останется без доступа до вмешательства
+// оператора.
+func enrollIfNeeded(
+	ctx context.Context,
+	cfg *config.Config,
+	ident *config.Identity,
+	cp *controlplane.Client,
+	keys xray.RealityKeys,
+	logger *slog.Logger,
+) (*config.Identity, error) {
+	if ident != nil && ident.AgentToken != "" {
+		if cfg.BootstrapToken != "" {
+			cfg.BootstrapToken = ""
+			logger.Warn("bootstrap_token задан, но нода уже заэнроллена — токен проигнорирован, удалите его из конфига")
+		}
+		return ident, nil
+	}
+	if cfg.BootstrapToken == "" {
+		return ident, nil
+	}
+
+	res, err := cp.Enroll(ctx, controlplane.EnrollRequest{
+		NodeID:           cfg.NodeID,
+		BootstrapToken:   cfg.BootstrapToken,
+		RealityPublicKey: keys.PublicKeyBase64,
+		ShortIDs:         keys.ShortIDs,
+		AgentVersion:     version,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enroll: %w", err)
+	}
+
+	enrolled := config.Identity{
+		NodeID:     cfg.NodeID,
+		AgentToken: res.AgentToken,
+		AgentEpoch: strconv.FormatInt(res.AgentEpoch, 10),
+		EnrolledAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := config.SaveIdentity(cfg.StateDir, enrolled); err != nil {
+		return nil, fmt.Errorf("persist identity: %w", err)
+	}
+	cp.UseToken(res.AgentToken)
+	cfg.BootstrapToken = "" // одноразовый: из памяти убираем сразу после обмена
+
+	logger.Info("enrolled with control plane",
+		"node_id", cfg.NodeID,
+		"agent_epoch", enrolled.AgentEpoch,
+		"identity_path", config.IdentityPath(cfg.StateDir))
+	logger.Warn("bootstrap_token использован и больше не действует — удалите его из конфига агента")
+	return &enrolled, nil
+}
+
 // agentEpochOrFallback guarantees a non-empty epoch for report_id uniqueness.
-// TODO: the epoch should be assigned by the control plane at registration and
-// persisted; the boot-time fallback only covers pre-registration local runs.
-func agentEpochOrFallback(cfg *config.Config) string {
+// Источник истины — эпоха, выданная control-plane при энроллменте: она растёт на
+// каждую переналивку ноды, и report_id новой инкарнации не сталкиваются с уже
+// принятыми. Значение из конфига и время старта — запасные варианты для нод,
+// которые ещё не проходили энроллмент.
+func agentEpochOrFallback(cfg *config.Config, ident *config.Identity) string {
+	if ident != nil && ident.AgentEpoch != "" {
+		return ident.AgentEpoch
+	}
 	if cfg.AgentEpoch != "" {
 		return cfg.AgentEpoch
 	}

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
 import { SubscribersService } from "./subscribers.service.js";
 
 @Controller()
@@ -33,6 +33,25 @@ export class SubscribersController {
   @Post("internal/subscriptions/trial")
   trial(@Body() body: { subscriberId: string }) {
     return this.subscribers.activateTrial(body.subscriberId);
+  }
+
+  // --- подписки из админки ---
+
+  @Get("api/admin/subscriptions/:id/devices")
+  devices(@Param("id") id: string) {
+    return this.subscribers.listDevices(id);
+  }
+
+  /** hwid приходит из URL — админка обязана его энкодить, в нём бывает что угодно. */
+  @Delete("api/admin/subscriptions/:id/devices/:hwid")
+  unlinkDevice(@Param("id") id: string, @Param("hwid") hwid: string) {
+    return this.subscribers.unlinkDevice(id, hwid);
+  }
+
+  /** Утечка ссылки: старый URL умирает, новый юзер получает из бота (overview). */
+  @Post("api/admin/subscriptions/:id/revoke")
+  revoke(@Param("id") id: string) {
+    return this.subscribers.revoke(id);
   }
 
   // --- управление тарифами из админки ---

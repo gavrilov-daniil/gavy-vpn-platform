@@ -3,6 +3,7 @@ import { NodeStateService } from "./node-state.service.js";
 import { CascadeService } from "./cascade.service.js";
 import { StatsService } from "./stats.service.js";
 import { AbuseService } from "./abuse.service.js";
+import { NodeIdentityService } from "./node-identity.service.js";
 
 /** Управление нодами и каскадами из админки. */
 @Controller("api/admin")
@@ -12,7 +13,17 @@ export class NodesAdminController {
     private readonly cascades: CascadeService,
     private readonly stats: StatsService,
     private readonly abuse: AbuseService,
+    private readonly identity: NodeIdentityService,
   ) {}
+
+  /**
+   * Выпустить одноразовый bootstrap-токен для энроллмента ноды.
+   * Значение возвращается ЕДИНСТВЕННЫЙ раз: в БД лежит только его хеш.
+   */
+  @Post("nodes/:id/enrollment")
+  issueEnrollment(@Param("id") id: string) {
+    return this.identity.issueBootstrapToken(id);
+  }
 
   /** Пересобрать desired-state ноды (после смены inbound'ов, планов, доступов). */
   @Post("nodes/:id/rebuild")
