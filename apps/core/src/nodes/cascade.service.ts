@@ -143,6 +143,19 @@ export class CascadeService {
     return Boolean(desired && reported && desired.configHash === reported.appliedConfigHash);
   }
 
+  /**
+   * Привязка канала подписки к каскаду. Без неё выдача не знает, что канал
+   * каскадный, и раздаёт его клиентам независимо от готовности плеч.
+   */
+  async attachChannel(cascadeLinkId: string, channelId: string) {
+    const [row] = await this.db
+      .update(schema.channel)
+      .set({ cascadeLinkId })
+      .where(and(eq(schema.channel.orgId, this.cfg.defaultOrgId), eq(schema.channel.id, channelId)))
+      .returning();
+    return row ?? null;
+  }
+
   /** Каналы, которые можно показывать в подписке. */
   async listActive() {
     return this.db

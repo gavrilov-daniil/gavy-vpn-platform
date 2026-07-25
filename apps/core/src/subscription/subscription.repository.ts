@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Database } from "@vpn/db";
 import type { ChannelInput, DomainList, FrontOutbound, GeneratorInput, ProfileInput } from "@vpn/xray-config";
@@ -12,6 +12,8 @@ export interface SubscriptionBundle {
 
 @Injectable()
 export class SubscriptionRepository {
+  private readonly log = new Logger(SubscriptionRepository.name);
+
   constructor(@Inject(DB) private readonly db: Database) {}
 
   async findByShortUuid(
@@ -53,7 +55,7 @@ export class SubscriptionRepository {
     subscription: typeof schema.subscription.$inferSelect,
   ): Promise<SubscriptionBundle | null> {
     const channels = await this.loadChannels(orgId);
-    const profiles = await this.loadProfiles(orgId);
+    const profiles = await this.loadProfiles(orgId, new Set(channels.map((c) => c.tag)));
     if (channels.length === 0 || profiles.length === 0) return null;
 
     const input: GeneratorInput = {
@@ -65,15 +67,30 @@ export class SubscriptionRepository {
     return { subscription, input, profiles };
   }
 
+  /**
+   * Каналы, которые допустимо показывать клиенту прямо сейчас.
+   * Отсекаем: хост без записи, выключенный/скрытый хост и каскад, у которого
+   * не обе ноды применили конфиг (иначе балансер уведёт трафик в полу-собранную
+   * цепочку — чёрную дыру без единого сообщения клиенту).
+   */
   private async loadChannels(orgId: string): Promise<ChannelInput[]> {
     const rows = await this.db
-      .select({ ch: schema.channel, host: schema.host })
+      .select({ ch: schema.channel, host: schema.host, link: schema.cascadeLink })
       .from(schema.channel)
       .leftJoin(schema.host, eq(schema.channel.hostId, schema.host.id))
-      .where(eq(schema.channel.orgId, orgId));
+      .leftJoin(schema.cascadeLink, eq(schema.channel.cascadeLinkId, schema.cascadeLink.id))
+      .where(
+        and(
+          eq(schema.channel.orgId, orgId),
+          eq(schema.host.isDisabled, false),
+          eq(schema.host.isHidden, false),
+        ),
+      );
 
     return rows
       .filter((r) => r.host)
+      // канал без привязки к каскаду — обычный direct, его не отсекаем
+      .filter((r) => !r.ch.cascadeLinkId || r.link?.status === "active")
       .map(({ ch, host }) => ({
         kind: ch.kind as "direct" | "cascade",
         tag: ch.newTag ?? ch.tag,
@@ -82,7 +99,15 @@ export class SubscriptionRepository {
       }));
   }
 
-  private async loadProfiles(orgId: string): Promise<ProfileInput[]> {
+  /**
+   * Профили собираются ТОЛЬКО из фактически доступных каналов.
+   * Если строить их независимо, отфильтрованный выше канал остался бы в профиле,
+   * генератор бросил бы «channel not found» — и выдача легла бы у всей базы
+   * из-за одного неактивного каскада.
+   * Профиль, у которого не осталось каналов, выбрасываем целиком: балансер
+   * с пустым селектором — это клиент без интернета и без сообщения об ошибке.
+   */
+  private async loadProfiles(orgId: string, availableTags: Set<string>): Promise<ProfileInput[]> {
     const profs = await this.db
       .select()
       .from(schema.profile)
@@ -95,23 +120,45 @@ export class SubscriptionRepository {
       .innerJoin(schema.channel, eq(schema.profileChannel.channelId, schema.channel.id))
       .where(eq(schema.profileChannel.orgId, orgId));
 
-    return profs.map((p) => {
+    const profiles: ProfileInput[] = [];
+    for (const p of profs) {
       const mine = pcs.filter((x) => x.pc.profileId === p.id);
       const tag = (x: (typeof mine)[number]) => x.ch.newTag ?? x.ch.tag;
-      return {
+      const pick = (tier: number) =>
+        mine
+          .filter((x) => x.pc.tier === tier)
+          .sort(bySort)
+          .map(tag)
+          .filter((t) => availableTags.has(t));
+
+      const primary = pick(1);
+      const fallback = pick(2);
+      if (primary.length === 0 && fallback.length === 0) {
+        this.log.warn(`профиль «${p.remark}» пропущен: не осталось доступных каналов`);
+        continue;
+      }
+      // если пуст только primary — поднимаем fallback, чтобы не остаться без tier1
+      profiles.push({
         remark: p.remark,
         isAuto: p.isAuto,
-        primary: mine.filter((x) => x.pc.tier === 1).sort(bySort).map(tag),
-        fallback: mine.filter((x) => x.pc.tier === 2).sort(bySort).map(tag),
-      };
-    });
+        primary: primary.length > 0 ? primary : fallback,
+        fallback: primary.length > 0 ? fallback : [],
+      });
+    }
+    return profiles;
   }
 
   private async loadFront(orgId: string): Promise<FrontOutbound | undefined> {
     const rows = await this.db
       .select()
       .from(schema.host)
-      .where(and(eq(schema.host.orgId, orgId), eq(schema.host.tagPrefix, "front")))
+      .where(
+        and(
+          eq(schema.host.orgId, orgId),
+          eq(schema.host.tagPrefix, "front"),
+          eq(schema.host.isDisabled, false),
+        ),
+      )
       .limit(1);
     const h = rows[0];
     if (!h) return undefined;

@@ -33,6 +33,10 @@ export function validateConfig(config: XrayConfig): ValidationResult {
   //    и каждый элемент селектора должен резолвиться в существующий outbound.
   for (const b of balancers) {
     const sel = (b.selector ?? []) as string[];
+    // балансер без кандидатов = у клиента просто нет интернета, и он об этом не узнает
+    if (sel.length === 0) {
+      errors.push(`балансер "${b.tag}" с пустым селектором — трафику некуда идти`);
+    }
     for (const s of sel) {
       if ("freedom".startsWith(s)) {
         errors.push(`селектор балансера "${b.tag}" содержит "${s}" — префиксно зацепит freedom, рунет уйдёт в туннель`);

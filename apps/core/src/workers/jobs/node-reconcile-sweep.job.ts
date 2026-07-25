@@ -4,6 +4,7 @@ import { schema, type Database } from "@vpn/db";
 import { DB } from "../../db/db.module.js";
 import { loadConfig } from "../../config.js";
 import { NodeStateService } from "../../nodes/node-state.service.js";
+import { CascadeService } from "../../nodes/cascade.service.js";
 import { AlertService, dayBucket } from "../alert.service.js";
 import type { JobRunner } from "../job.types.js";
 
@@ -26,6 +27,7 @@ export class NodeReconcileSweepJob implements JobRunner {
   constructor(
     @Inject(DB) private readonly db: Database,
     private readonly nodes: NodeStateService,
+    private readonly cascades: CascadeService,
     private readonly alerts: AlertService,
   ) {}
 
@@ -65,10 +67,19 @@ export class NodeReconcileSweepJob implements JobRunner {
       );
     }
 
+    // Статусы каскадов обычно пересчитываются по отчёту агента. Если агент замолчал
+    // совсем, отчёта не будет — и канал завис бы в active, продолжая раздаваться
+    // клиентам. Здесь пересчитываем принудительно для всех нод.
+    let cascadesChecked = 0;
+    for (const row of rows) {
+      cascadesChecked += await this.cascades.refreshForNode(row.node.id);
+    }
+
     return {
       nodesTotal: rebuild.total,
       nodesRebuilt: rebuild.changed.length,
       nodesFailed: rebuild.failed.length,
+      cascadesChecked,
       drifted,
     };
   }

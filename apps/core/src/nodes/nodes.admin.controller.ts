@@ -51,6 +51,12 @@ export class NodesAdminController {
     return this.cascades.refreshStatus(id);
   }
 
+  /** Привязать канал подписки к каскаду — иначе выдача не проверит его готовность. */
+  @Post("cascades/:id/attach-channel")
+  attachChannel(@Param("id") id: string, @Body() body: { channelId: string }) {
+    return this.cascades.attachChannel(id, body.channelId);
+  }
+
   @Get("usage/:shortUuid")
   usage(@Param("shortUuid") shortUuid: string) {
     return this.stats.usageBySubscription(shortUuid);
