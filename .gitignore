@@ -12,6 +12,7 @@ dist/
 
 # go
 apps/node-agent/bin/
+apps/node-agent/dist/
 
 # os
 .DS_Store
