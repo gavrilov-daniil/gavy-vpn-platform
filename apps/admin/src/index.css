@@ -817,3 +817,13 @@ select {
   right: 16px;
   bottom: 16px;
 }
+
+/* Необратимое действие: перевыпуск подписки рвёт доступ клиенту до получения новой ссылки. */
+.btn-danger {
+  border-color: #b23b3b;
+  color: #b23b3b;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #b23b3b;
+  color: #fff;
+}

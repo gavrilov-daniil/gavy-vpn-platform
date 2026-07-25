@@ -1,5 +1,15 @@
-import { useState } from "react";
-import { errorMessage, getSubscribers, getUsage, type Subscriber, type UsageRow } from "../api";
+import { useEffect, useState } from "react";
+import {
+  errorMessage,
+  getDevices,
+  getSubscribers,
+  getUsage,
+  revokeSubscription,
+  unlinkDevice,
+  type Subscriber,
+  type SubscriberDevice,
+  type UsageRow,
+} from "../api";
 import { useResource } from "../useResource";
 import { daysLeft, formatBytes, formatDateTime } from "../format";
 import Card from "../components/Card";
@@ -207,6 +217,132 @@ function SubscriberDetails({ subscriber, onClose }: { subscriber: Subscriber; on
         ) : (
           <Table columns={columns} rows={usage} rowKey={(r) => `${r.day}:${r.nodeId}`} />
         ))}
+
+      <DevicesBlock subscriptionId={subscriber.id} deviceLimit={subscriber.deviceLimit} />
+      <RevokeBlock subscriptionId={subscriber.id} />
     </Card>
+  );
+}
+
+/** Устройства подписки: занятые слоты и отвязка застрявшего устройства. */
+function DevicesBlock({ subscriptionId, deviceLimit }: { subscriptionId: string; deviceLimit: number | null }) {
+  const [devices, setDevices] = useState<SubscriberDevice[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = async () => {
+    setError(null);
+    try {
+      setDevices(await getDevices(subscriptionId));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // подписка сменилась — список надо перечитать, иначе покажем чужие устройства
+  }, [subscriptionId]);
+
+  const unlink = async (hwid: string) => {
+    setBusy(hwid);
+    setError(null);
+    try {
+      await unlinkDevice(subscriptionId, hwid);
+      await load();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const columns: Column<SubscriberDevice>[] = [
+    { key: "hwid", title: "HWID", render: (d) => <span className="mono small">{d.hwid}</span> },
+    { key: "os", title: "Платформа", render: (d) => d.deviceOs ?? "—" },
+    { key: "model", title: "Модель", render: (d) => d.deviceModel ?? "—" },
+    { key: "last", title: "Последний раз", render: (d) => formatDateTime(d.lastSeenAt) },
+    {
+      key: "act",
+      title: "",
+      align: "right",
+      render: (d) => (
+        <button type="button" className="btn btn-sm" onClick={() => void unlink(d.hwid)} disabled={busy === d.hwid}>
+          {busy === d.hwid ? "…" : "Отвязать"}
+        </button>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <h3 className="form-section">
+        Устройства {devices ? `(${devices.length}${deviceLimit ? ` из ${deviceLimit}` : ""})` : ""}
+      </h3>
+      {error && <ErrorBox error={error} />}
+      {devices === null ? (
+        <Loading />
+      ) : devices.length === 0 ? (
+        <EmptyState text="Устройств нет" hint="Клиент ещё не открывал подписку или не шлёт HWID." />
+      ) : (
+        <Table columns={columns} rows={devices} rowKey={(d) => d.hwid} />
+      )}
+    </>
+  );
+}
+
+/**
+ * Перевыпуск подписки при утечке ссылки. Действие необратимое и рвёт доступ
+ * до тех пор, пока клиент не заберёт новую ссылку в боте, поэтому с подтверждением.
+ */
+function RevokeBlock({ subscriptionId }: { subscriptionId: string }) {
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const revoke = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await revokeSubscription(subscriptionId);
+      setResult(r.subscriptionUrl);
+      setConfirming(false);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <h3 className="form-section">Перевыпуск подписки</h3>
+      {error && <ErrorBox error={error} />}
+      {result ? (
+        <p className="small">
+          Новая ссылка: <span className="mono">{result}</span>. Старая больше не работает — клиент заберёт новую в боте.
+        </p>
+      ) : confirming ? (
+        <div className="inline-form">
+          <span className="small">
+            Старая ссылка перестанет работать сразу, устройства отвяжутся. Клиенту придётся взять новую в боте.
+          </span>
+          <button type="button" className="btn btn-danger" onClick={() => void revoke()} disabled={busy}>
+            {busy ? "Перевыпускаем…" : "Да, перевыпустить"}
+          </button>
+          <button type="button" className="btn btn-sm" onClick={() => setConfirming(false)} disabled={busy}>
+            Отмена
+          </button>
+        </div>
+      ) : (
+        <div className="inline-form">
+          <span className="small">Применять при утечке ссылки: меняет адрес подписки и идентификатор в конфиге.</span>
+          <button type="button" className="btn" onClick={() => setConfirming(true)}>
+            Перевыпустить
+          </button>
+        </div>
+      )}
+    </>
   );
 }

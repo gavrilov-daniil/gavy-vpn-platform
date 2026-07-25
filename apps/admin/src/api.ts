@@ -209,10 +209,39 @@ export interface UsageRow {
   down: number;
 }
 
+export interface SubscriberDevice {
+  hwid: string;
+  deviceOs: string | null;
+  deviceModel: string | null;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+}
+
+export interface RevokeResult {
+  shortUuid: string;
+  subscriptionUrl: string;
+  nodesChanged?: number;
+  nodesFailed?: number;
+}
+
 export const getSubscribers = () => request<Subscriber[]>("/api/admin/subscribers");
 
 export const getUsage = (shortUuid: string) =>
   request<UsageRow[]>(`/api/admin/usage/${encodeURIComponent(shortUuid)}`);
+
+export const getDevices = (subscriptionId: string) =>
+  request<SubscriberDevice[]>(`/api/admin/subscriptions/${subscriptionId}/devices`);
+
+/** hwid обязателен к энкодингу: там бывает что угодно, включая слеши. */
+export const unlinkDevice = (subscriptionId: string, hwid: string) =>
+  request<{ ok: boolean; removed: number }>(
+    `/api/admin/subscriptions/${subscriptionId}/devices/${encodeURIComponent(hwid)}`,
+    { method: "DELETE" },
+  );
+
+/** Утечка ссылки: старый URL умирает, клиент получает новый в боте. */
+export const revokeSubscription = (subscriptionId: string) =>
+  request<RevokeResult>(`/api/admin/subscriptions/${subscriptionId}/revoke`, { method: "POST" });
 
 // --- Поддержка --------------------------------------------------------------
 
