@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Logger, Param, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Logger, NotFoundException, Param, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { PROVIDER_SPECS, STARS_INTERNAL_CONFIRM_HEADER } from "@vpn/payments";
 import { PaymentService } from "./payment.service.js";
@@ -22,8 +22,11 @@ export class PaymentsController {
   /**
    * Вебхук платёжного провайдера.
    * Подпись считается по СЫРОМУ телу: ре-сериализованный JSON меняет байты и ломает проверку.
-   * Ответ всегда 200 при внутренней ошибке — иначе провайдер завалит ретраями;
-   * невалидная подпись — 401, до всякой обработки.
+   *
+   * Коды ответа:
+   *   401 — невалидная подпись, до всякой обработки;
+   *   503 — мерчантов провайдера нет, обработать нечем: просим провайдера повторить;
+   *   200 — всё остальное, включая внутренние ошибки: ретраи по ним только вредят.
    */
   @Post("webhooks/:provider")
   async webhook(
@@ -58,8 +61,19 @@ export class PaymentsController {
       }
       res.status(200).send({ ok: true });
     } catch (err) {
+      // «Нет включённых мерчантов провайдера» — это не сбой обработки, а то, что
+      // обработка не начиналась: мерчанта выключили или ещё не настроили. Ответить
+      // 200 здесь значит сказать провайдеру «платёж принят» и потерять его молча.
+      // Отдаём 503, чтобы провайдер повторил и платёж дожил до починки конфига.
+      if (err instanceof NotFoundException) {
+        this.log.error(`webhook ${provider}: нет включённых мерчантов, платёж не обработан — просим повтор`);
+        res.status(503).send({ ok: false });
+        return;
+      }
+      // Остальные внутренние ошибки — 200: ретраи по ним вредны (провайдер завалит
+      // штормом), разбор идёт по логу и сырому телу вебхука.
       this.log.error(`webhook ${provider} упал: ${err instanceof Error ? err.message : String(err)}`);
-      res.status(200).send({ ok: true }); // не провоцируем шторм ретраев
+      res.status(200).send({ ok: true });
     }
   }
 

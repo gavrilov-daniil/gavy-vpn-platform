@@ -201,7 +201,7 @@ export function validateConfig(config: XrayConfig): ValidationResult {
     errors.push(`routing.domainStrategy должен быть "AsIs" (сейчас "${routing.domainStrategy}")`);
   }
 
-  // 8. порядок head-правил: block → приватные CIDR → РФ → catch-all.
+  // 8. порядок head-правил: приватные CIDR → bittorrent → udp:443 → РФ → catch-all.
   //    Регресс порядка не ломает конфиг синтаксически: рунет просто уезжает в туннель (или наоборот).
   const quicIdx = rules.findIndex(isBlockQuic);
   const btIdx = rules.findIndex(isBlockBittorrent);

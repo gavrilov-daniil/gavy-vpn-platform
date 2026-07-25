@@ -191,11 +191,15 @@ export const refreshCascade = (id: string) =>
 export interface Subscriber {
   /** id подписки, не подписчика. */
   id: string;
+  shortUuid: string;
   username: string | null;
   telegramId: number | null;
   status: string;
   expireAt: string | null;
   usedTrafficBytes: number;
+  /** null — без лимита. */
+  deviceLimit: number | null;
+  devicesUsed: number;
 }
 
 export interface UsageRow {
@@ -443,4 +447,37 @@ export interface Plan {
   squadIds: string[];
 }
 
-export const getPlans = () => request<Plan[]>("/v1/plans");
+/**
+ * Админский список тарифов. Не `/v1/plans`: публичный эндпоинт отдаёт только
+ * включённые тарифы, а админке нужны и выключенные — иначе их нечем включить.
+ */
+export const getPlans = () => request<Plan[]>("/api/admin/plans");
+
+/** `code` задаётся только при создании: он ключ тарифа (UNIQUE(org, code)). */
+export const createPlan = (body: {
+  code: string;
+  title: string;
+  periodDays: number;
+  priceKopeks: number;
+  trafficGb?: number;
+  deviceLimit?: number;
+  isTrial?: boolean;
+  sortOrder?: number;
+  squadIds?: string[];
+}) => request<Plan>("/api/admin/plans", post(body));
+
+export const updatePlan = (
+  id: string,
+  body: {
+    title?: string;
+    periodDays?: number;
+    priceKopeks?: number;
+    /** null снимает лимит; undefined — не трогать поле. */
+    trafficGb?: number | null;
+    deviceLimit?: number | null;
+    isActive?: boolean;
+    isTrial?: boolean;
+    sortOrder?: number;
+    squadIds?: string[];
+  },
+) => request<Plan>(`/api/admin/plans/${id}`, patch(body));

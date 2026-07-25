@@ -60,6 +60,20 @@ export default function SubscribersPage() {
     },
     { key: "traffic", title: "Трафик", align: "right", render: (s) => formatBytes(s.usedTrafficBytes) },
     {
+      key: "devices",
+      title: "Устройства",
+      align: "right",
+      render: (s) => {
+        const limit = s.deviceLimit;
+        if (limit === null) return <span>{s.devicesUsed} / без лимита</span>;
+        return (
+          <span className={s.devicesUsed >= limit ? "warn" : undefined}>
+            {s.devicesUsed} / {limit}
+          </span>
+        );
+      },
+    },
+    {
       key: "actions",
       title: "",
       align: "right",
@@ -82,7 +96,6 @@ export default function SubscribersPage() {
 
       <Card
         title={`Подписки (${page.data.length})`}
-        subtitle="Лимит устройств и число активных устройств этот эндпоинт не отдаёт."
         actions={
           <input
             className="search"
@@ -107,13 +120,17 @@ export default function SubscribersPage() {
         )}
       </Card>
 
-      {selected && <SubscriberDetails subscriber={selected} onClose={() => setSelected(null)} />}
+      {/* key: при переключении подписчика форма и загруженная статистика должны
+          сброситься, иначе в карточке остаются цифры от предыдущего. */}
+      {selected && (
+        <SubscriberDetails key={selected.id} subscriber={selected} onClose={() => setSelected(null)} />
+      )}
     </>
   );
 }
 
 function SubscriberDetails({ subscriber, onClose }: { subscriber: Subscriber; onClose: () => void }) {
-  const [shortUuid, setShortUuid] = useState("");
+  const [shortUuid, setShortUuid] = useState(subscriber.shortUuid);
   const [usage, setUsage] = useState<UsageRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,10 +192,7 @@ function SubscriberDetails({ subscriber, onClose }: { subscriber: Subscriber; on
 
       <h3 className="form-section">Использование по нодам</h3>
       <div className="inline-form">
-        <Field
-          label="shortUuid подписки"
-          hint="Список подписчиков shortUuid не возвращает, поэтому его вводят вручную."
-        >
+        <Field label="shortUuid подписки" hint="Подставлен из выбранной подписки; можно заменить на любой другой.">
           <input value={shortUuid} onChange={(e) => setShortUuid(e.target.value)} placeholder="demoshortuuid0001" />
         </Field>
         <button type="button" className="btn" onClick={load} disabled={loading}>

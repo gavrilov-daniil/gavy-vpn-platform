@@ -73,7 +73,7 @@ trial:activate
 
 **Важно про `<...Short>`.** В `callback_data` Telegram влезает 64 байта, а `pay:<uuid>:<uuid>` — это 77. Поэтому в кнопку кладётся первые 8 hex-символов id, а полный id восстанавливается по списку из core (`shortId` / `pickByShort` в `src/bot/ui.ts`). Неоднозначный префикс трактуется как промах — юзеру показывается «кнопка устарела», а не случайный объект.
 
-Способы оплаты **не захардкожены**: приходят из `GET /v1/payments/methods/plan|topup` (там уже отфильтрованы включённые и настроенные мерчанты). Ответ `POST /v1/payments/create` разветвляется на `payUrl` (кнопка-ссылка) или `deferredToBot` (Stars — счёт выставляет сам бот: `currency: XTR`, `provider_token: ""`).
+Способы оплаты **не захардкожены**: приходят из `GET /internal/payments/methods/plan|topup` (там уже отфильтрованы включённые и настроенные мерчанты). Ответ `POST /internal/payments/create` разветвляется на `payUrl` (кнопка-ссылка) или `deferredToBot` (Stars — счёт выставляет сам бот: `currency: XTR`, `provider_token: ""`).
 
 ## Идемпотентность
 
@@ -87,20 +87,23 @@ trial:activate
 
 ## Контракт core
 
-Уже есть в `@vpn/core`:
+Всё, что бот зовёт, в `@vpn/core` реализовано:
 
-- `GET /v1/payments/methods/:purpose`
-- `POST /v1/payments/create`
+| Метод | Путь | Ответ |
+|---|---|---|
+| POST | `/internal/subscribers/resolve` | `{subscriberId, isNew}` |
+| GET | `/internal/subscribers/:id/overview` | баланс, подписка, рефералка, устройства, `trialAvailable` |
+| GET | `/v1/plans` | `PlanDto[]` (только включённые тарифы) |
+| POST | `/internal/subscriptions/trial` | результат активации триала |
+| GET | `/internal/payments/methods/:purpose` | доступные способы оплаты |
+| POST | `/internal/payments/create` | `{paymentId, payUrl \| deferredToBot, ...}` |
+| POST | `/internal/payments/stars/pre-checkout` | `{ok, reason?}` |
+| POST | `/internal/payments/stars/confirm` | `{ok, alreadyProcessed?, planTitle?, expireAt?}` |
+| POST | `/internal/support/inbound` | — |
+| POST | `/internal/bot-events/track` | — |
 
-Ожидаются ботом, но в core пока не реализованы:
-
-- `POST /internal/subscribers/resolve` → `{subscriberId, isNew}`
-- `GET /v1/plans` → `PlanDto[]`
-- `GET /internal/subscribers/:id/overview` → баланс, подписка, рефералка, устройства, `trialAvailable`
-- `POST /internal/subscriptions/trial`
-- `POST /internal/payments/stars/pre-checkout` → `{ok, reason?}`
-- `POST /internal/payments/stars/confirm` → `{ok, alreadyProcessed?, planTitle?, expireAt?}`
-- `POST /internal/support/inbound`
-- `POST /internal/bot-events/track`
+Способы оплаты и создание счёта живут под `/internal/*`, а не `/v1/*`: это
+вызовы бот → core за `x-service-token`, наружу они не торчат. Публичный
+префикс `/v1/` остался только у `/v1/plans`.
 
 Все `/internal/*` вызываются с заголовком `x-service-token`, записи — ещё и с `x-client-request-id`.

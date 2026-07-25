@@ -27,17 +27,26 @@ type Reconciler struct {
 	log          *slog.Logger
 	agentVersion string
 	statePath    string
+
+	// lastStatsRead — момент предыдущего деструктивного чтения счётчиков; он же
+	// window_start следующей дельты. Живёт только в памяти: после рестарта окно
+	// начинается со старта процесса, и это корректно — счётчики в Xray на тот
+	// момент уже обнулены прошлым чтением, а рестарт самого Xray обнуляет их
+	// целиком. Времена монотонно растут, поэтому дедуп control-plane по
+	// (node, subject, window_start) не задевается.
+	lastStatsRead time.Time
 }
 
 func New(cfg *config.Config, cp *controlplane.Client, xr *xray.Manager, sb *stats.Buffer, log *slog.Logger, agentVersion string) *Reconciler {
 	return &Reconciler{
-		cfg:          cfg,
-		cp:           cp,
-		xray:         xr,
-		stats:        sb,
-		log:          log,
-		agentVersion: agentVersion,
-		statePath:    filepath.Join(cfg.StateDir, "applied-state.json"),
+		cfg:           cfg,
+		cp:            cp,
+		xray:          xr,
+		stats:         sb,
+		log:           log,
+		agentVersion:  agentVersion,
+		statePath:     filepath.Join(cfg.StateDir, "applied-state.json"),
+		lastStatsRead: time.Now().UTC(),
 	}
 }
 
@@ -101,6 +110,11 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	if err := r.report(ctx, applied); err != nil {
 		return fmt.Errorf("report: %w", err)
 	}
+	// Метрики не важнее конфига: не сняли статистику — жалуемся и идём дальше,
+	// нода при этом продолжает обслуживать актуальный desired-state.
+	if err := r.collectStats(ctx); err != nil {
+		r.log.Warn("reconcile: stats collection failed", "err", err)
+	}
 	if err := r.shipStats(ctx); err != nil {
 		return fmt.Errorf("ship stats: %w", err)
 	}
@@ -117,10 +131,69 @@ func (r *Reconciler) apply(ctx context.Context, ds *controlplane.DesiredState) e
 	// TODO(M2): apply user-only deltas live via Xray gRPC HandlerService.AlterInbound
 	// (add/remove clients without dropping connections), and only reload/restart
 	// when non-user parts of the config actually change.
+
+	// Рестарт поднимает Xray с нулевыми счётчиками, поэтому снимаем накопленное
+	// ДО него — иначе трафик с прошлого чтения уходит вместе со старым процессом.
+	if err := r.collectStats(ctx); err != nil {
+		r.log.Warn("reconcile: stats collection before restart failed", "err", err)
+	}
 	if err := r.xray.Restart(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+// collectStats снимает дельту счётчиков с Xray и кладёт её в durable-буфер.
+//
+// Порядок здесь — не стилистика. QueryStats(reset=true) уже обнулил счётчики,
+// поэтому дельта существует единственным экземпляром в памяти, и записать её на
+// диск надо до любых сетевых операций (отправка идёт отдельно, из shipStats по
+// содержимому буфера). Окно дельты — [lastStatsRead, момент чтения], и
+// lastStatsRead двигается ТОЛЬКО после успешного Append: если запись не удалась,
+// следующее окно поглотит потерянный интервал, а не начнётся с дырой.
+func (r *Reconciler) collectStats(ctx context.Context) error {
+	windowStart := r.lastStatsRead
+
+	counters, err := r.xray.Stats(ctx)
+	if err != nil {
+		return err
+	}
+	readAt := time.Now().UTC()
+
+	// Xray отдаёт все зарегистрированные счётчики, включая нулевые: на ноде с
+	// тысячей юзеров это тысячи пустых записей каждые 30 секунд. Шлём только то,
+	// где реально был трафик.
+	counters = nonZero(counters)
+	if len(counters) == 0 {
+		// Окно всё равно закрываем — иначе window_start застынет и следующая
+		// дельта приедет окном в несколько часов.
+		r.lastStatsRead = readAt
+		return nil
+	}
+
+	entry, err := r.stats.Append(windowStart, counters)
+	if err != nil {
+		// Счётчики в Xray уже обнулены, а на диск дельта не легла — эти байты
+		// потеряны. Громко, потому что это прямая недостача в учёте трафика.
+		r.log.Error("reconcile: stats delta lost, buffer write failed", "counters", len(counters), "err", err)
+		return err
+	}
+	r.lastStatsRead = readAt
+	r.log.Debug("reconcile: stats collected",
+		"report_id", entry.ReportID,
+		"counters", len(counters),
+		"window_start", windowStart.Format(time.RFC3339))
+	return nil
+}
+
+func nonZero(counters []stats.Counter) []stats.Counter {
+	out := counters[:0]
+	for _, c := range counters {
+		if c.Value != 0 {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (r *Reconciler) report(ctx context.Context, applied appliedState) error {
@@ -140,10 +213,6 @@ func (r *Reconciler) report(ctx context.Context, applied appliedState) error {
 
 // shipStats ships the buffered stats batches one by one — each carries its own
 // report_id, which is what the control plane dedups on.
-//
-// TODO(M2): read counters via xray.Stats (QueryStats reset=true) and
-// r.stats.Append them before shipping. For now we only ship whatever is already
-// buffered (normally nothing in v1).
 func (r *Reconciler) shipStats(ctx context.Context) error {
 	for _, entry := range r.stats.Pending() {
 		accepted, err := r.cp.ShipStats(ctx, controlplane.BatchFromEntry(entry))

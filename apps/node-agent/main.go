@@ -60,7 +60,7 @@ func run(configPath string, logger *slog.Logger) error {
 		return fmt.Errorf("init control-plane client: %w", err)
 	}
 
-	xr := xray.NewManager(cfg.XraySystemdUnit, cfg.RealityPrivateKeyPath)
+	xr := xray.NewManager(cfg.XraySystemdUnit, cfg.RealityPrivateKeyPath, cfg.XrayAPIAddr)
 
 	// Ensure the Reality keypair before anything else. Idempotent, and in import
 	// mode it refuses to run when the migrated key is missing (never rotates pbk).

@@ -114,8 +114,11 @@ export class SubscribersService {
     const existing = await this.findSubscription(this.db, subscriberId);
     if (existing) return existing;
 
-    // Unique-индекса на subscriber_id нет, а параллельные /start зовут ensureSubscription
-    // одновременно — без блокировки у подписчика окажется две подписки (и два URL).
+    // Unique-индекса на subscriber_id нет и не будет: 0006 его заводила, 0007 сняла —
+    // вторая подписка у клиента (куплена для близких) оказалась законным состоянием.
+    // Значит инвариант «автоматически вторая подписка не создаётся» держится ТОЛЬКО
+    // этой блокировкой: без неё параллельные /start дадут подписчику два разных URL,
+    // и после оплаты обновится лишь один. Убирать нельзя.
     return this.db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`subscription:${subscriberId}`}, 0))`);
 

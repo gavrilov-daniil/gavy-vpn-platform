@@ -45,6 +45,12 @@ type Config struct {
 	XrayConfigPath  string
 	XraySystemdUnit string
 
+	// XrayAPIAddr — адрес локального api-инбаунда Xray (dokodemo-door), через
+	// который агент снимает статистику. Должен совпадать с тем, что кладёт в
+	// конфиг control-plane (packages/xray-config: 127.0.0.1:10085). Пустая
+	// строка выключает сбор статистики.
+	XrayAPIAddr string
+
 	// RealityKeypairMode selects brownfield behaviour. See EnsureRealityKeypair.
 	// RealityPrivateKeyPath is also where the agent reads the key it substitutes
 	// for the __REALITY_PRIVATE_KEY__ placeholder in the desired-state config.
@@ -69,6 +75,7 @@ type fileConfig struct {
 	CPPublicKeyPath       string `json:"cp_public_key_path"`
 	XrayConfigPath        string `json:"xray_config_path"`
 	XraySystemdUnit       string `json:"xray_systemd_unit"`
+	XrayAPIAddr           string `json:"xray_api_addr"`
 	RealityKeypairMode    string `json:"reality_keypair_mode"`
 	RealityPrivateKeyPath string `json:"reality_private_key_path"`
 	AgentEpoch            string `json:"agent_epoch"`
@@ -81,6 +88,7 @@ type fileConfig struct {
 func Load(path string) (*Config, error) {
 	fc := fileConfig{
 		XraySystemdUnit:       "xray.service",
+		XrayAPIAddr:           "127.0.0.1:10085",
 		RealityKeypairMode:    string(KeypairModeGenerate),
 		RealityPrivateKeyPath: "/var/lib/node-agent/reality.key",
 		PullInterval:          "30s",
@@ -113,6 +121,7 @@ func Load(path string) (*Config, error) {
 		CPPublicKeyPath:       fc.CPPublicKeyPath,
 		XrayConfigPath:        fc.XrayConfigPath,
 		XraySystemdUnit:       fc.XraySystemdUnit,
+		XrayAPIAddr:           fc.XrayAPIAddr,
 		RealityKeypairMode:    KeypairMode(fc.RealityKeypairMode),
 		RealityPrivateKeyPath: fc.RealityPrivateKeyPath,
 		AgentEpoch:            fc.AgentEpoch,
@@ -135,6 +144,7 @@ func applyEnv(fc *fileConfig) {
 	fc.CPPublicKeyPath = envOr("NODE_AGENT_CP_PUBLIC_KEY_PATH", fc.CPPublicKeyPath)
 	fc.XrayConfigPath = envOr("NODE_AGENT_XRAY_CONFIG_PATH", fc.XrayConfigPath)
 	fc.XraySystemdUnit = envOr("NODE_AGENT_XRAY_SYSTEMD_UNIT", fc.XraySystemdUnit)
+	fc.XrayAPIAddr = envOr("NODE_AGENT_XRAY_API_ADDR", fc.XrayAPIAddr)
 	fc.RealityKeypairMode = envOr("NODE_AGENT_REALITY_KEYPAIR_MODE", fc.RealityKeypairMode)
 	fc.RealityPrivateKeyPath = envOr("NODE_AGENT_REALITY_PRIVATE_KEY_PATH", fc.RealityPrivateKeyPath)
 	fc.AgentEpoch = envOr("NODE_AGENT_AGENT_EPOCH", fc.AgentEpoch)
