@@ -32,3 +32,20 @@ export const apiToken = pgTable("api_token", {
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("api_token_hash_uq").on(t.tokenHash)]);
+
+/**
+ * Сессия оператора админки. Пароль в браузере не храним — только случайный
+ * токен, и тот в БД лежит хешем: утечка дампа не должна давать готовые сессии.
+ */
+export const operatorSession = pgTable("operator_session", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  userId: uuid("user_id").notNull().references(() => user.id),
+  tokenHash: text("token_hash").notNull(),
+  userAgent: text("user_agent"),
+  ip: text("ip"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  createdAt: createdAt(),
+}, (t) => [uniqueIndex("operator_session_token_uq").on(t.tokenHash)]);

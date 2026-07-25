@@ -145,12 +145,19 @@ export const nodeReportedState = pgTable("node_reported_state", {
 });
 
 // Энроллмент агента: bootstrap-токен (БД — authority, Redis только fast-path), mTLS-cert.
+// Секретов в открытом виде тут нет: и bootstrap-, и agent-токен лежат только sha256-хешем.
 export const nodeIdentity = pgTable("node_identity", {
   nodeId: uuid("node_id").primaryKey().references(() => node.id),
   agentPubkey: text("agent_pubkey"),
   certFingerprint: text("cert_fingerprint"),
   bootstrapTokenHash: text("bootstrap_token_hash"),
   bootstrapConsumedAt: timestamp("bootstrap_consumed_at", { withTimezone: true }),
+  // per-node секрет агента: токен ноды A не должен открывать ноду B
+  agentTokenHash: text("agent_token_hash"),
+  agentTokenIssuedAt: timestamp("agent_token_issued_at", { withTimezone: true }),
   agentEpoch: integer("agent_epoch").notNull().default(0), // namespace для report_id (переналитая нода)
   enrolledAt: timestamp("enrolled_at", { withTimezone: true }),
-}, (t) => [uniqueIndex("node_identity_bootstrap_uq").on(t.bootstrapTokenHash)]);
+}, (t) => [
+  uniqueIndex("node_identity_bootstrap_uq").on(t.bootstrapTokenHash),
+  uniqueIndex("node_identity_agent_token_uq").on(t.agentTokenHash),
+]);

@@ -57,6 +57,20 @@
       "when": 1785040020000,
       "tag": "0007_drop_subscription_subscriber_uq",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785040030000,
+      "tag": "0008_operator_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785040040000,
+      "tag": "0009_node_identity_agent_token",
+      "breakpoints": true
     }
   ]
 }
