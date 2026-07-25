@@ -55,7 +55,12 @@ export const subscription = pgTable("subscription", {
 
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (t) => [uniqueIndex("subscription_org_short_uuid_uq").on(t.orgId, t.shortUuid)]);
+}, (t) => [
+  uniqueIndex("subscription_org_short_uuid_uq").on(t.orgId, t.shortUuid),
+  // одна подписка на подписчика: иначе параллельные /start в двух инстансах core
+  // выдали бы клиенту два разных URL, из которых обновлялся бы только один
+  uniqueIndex("subscription_org_subscriber_uq").on(t.orgId, t.subscriberId),
+]);
 
 // HWID-устройства. Идемпотентность device-limit — на unique index, не check-then-act (GHSA-паттерн).
 export const subscriberDevice = pgTable("subscriber_device", {
