@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { NodeStateService } from "./node-state.service.js";
 import { CascadeService } from "./cascade.service.js";
 import { StatsService } from "./stats.service.js";
+import { AbuseService } from "./abuse.service.js";
 
 /** Управление нодами и каскадами из админки. */
 @Controller("api/admin")
@@ -10,6 +11,7 @@ export class NodesAdminController {
     private readonly state: NodeStateService,
     private readonly cascades: CascadeService,
     private readonly stats: StatsService,
+    private readonly abuse: AbuseService,
   ) {}
 
   /** Пересобрать desired-state ноды (после смены inbound'ов, планов, доступов). */
@@ -52,5 +54,26 @@ export class NodesAdminController {
   @Get("usage/:shortUuid")
   usage(@Param("shortUuid") shortUuid: string) {
     return this.stats.usageBySubscription(shortUuid);
+  }
+
+  /** Прогон детекта абьюза по накопленной статистике. */
+  @Post("abuse/scan")
+  scanAbuse(@Body() body: { volumeBytesPerWindow?: number; seedingRatio?: number; ipFanout?: number; windowHours?: number }) {
+    return this.abuse.scan(body ?? {});
+  }
+
+  @Get("abuse/signals")
+  signals() {
+    return this.abuse.listSignals();
+  }
+
+  @Get("abuse/actions")
+  actions() {
+    return this.abuse.listActions();
+  }
+
+  @Post("abuse/release/:subscriptionId")
+  release(@Param("subscriptionId") subscriptionId: string) {
+    return this.abuse.release(subscriptionId);
   }
 }

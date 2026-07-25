@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Logger, Param, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Logger, Param, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { PROVIDER_SPECS } from "@vpn/payments";
 import { PaymentService } from "./payment.service.js";
 import { MerchantService } from "./merchant.service.js";
+import { IdempotencyService } from "../common/idempotency.service.js";
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
@@ -15,6 +16,7 @@ export class PaymentsController {
   constructor(
     private readonly payments: PaymentService,
     private readonly merchants: MerchantService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   /**
@@ -61,6 +63,10 @@ export class PaymentsController {
     }));
   }
 
+  /**
+   * Создание счёта. Идемпотентно по заголовку x-client-request-id:
+   * дабл-тап по кнопке оплаты в боте не должен создавать два счёта у провайдера.
+   */
   @Post("v1/payments/create")
   async create(
     @Body()
@@ -74,18 +80,21 @@ export class PaymentsController {
       method?: string;
       telegramUserId?: number;
     },
+    @Headers("x-client-request-id") clientRequestId?: string,
   ) {
-    const { payment, invoice } = await this.payments.createPayment(body);
-    return {
-      paymentId: payment.id,
-      provider: payment.provider,
-      amountKopeks: payment.amountKopeks,
-      payUrl: invoice.payUrl,
-      cryptoAsset: invoice.cryptoAsset,
-      cryptoAmount: invoice.cryptoAmount,
-      deferredToBot: invoice.deferredToBot,
-      expiresAt: invoice.expiresAt,
-    };
+    return this.idempotency.run("payment-create", clientRequestId, async () => {
+      const { payment, invoice } = await this.payments.createPayment(body);
+      return {
+        paymentId: payment.id,
+        provider: payment.provider,
+        amountKopeks: payment.amountKopeks,
+        payUrl: invoice.payUrl,
+        cryptoAsset: invoice.cryptoAsset,
+        cryptoAmount: invoice.cryptoAmount,
+        deferredToBot: invoice.deferredToBot,
+        expiresAt: invoice.expiresAt,
+      };
+    });
   }
 
   /** Спеки провайдеров — админка рисует форму подключения по ним. */
