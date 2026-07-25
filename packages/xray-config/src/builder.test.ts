@@ -85,7 +85,7 @@ test("ruSplit по умолчанию: РФ-домены и РФ-CIDR идут �
   const cfg = buildProfileConfig(fixture(), { remark: "🇩🇪 Германия", primary: ["de-direct"], fallback: [] }) as any;
   assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.domain) && r.domain.includes("domain:ru")));
   assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("77.88.0.0/18")));
-  assert.equal(cfg.dns.servers.length, 2);
+  assert.equal(cfg.dns.servers.length, 3); // РФ DoH + зарубежный DoH + plain-fallback (как в боевой выдаче)
   assert.deepEqual(validateConfig(cfg).errors, []);
 });
 
@@ -96,7 +96,7 @@ test("ruSplit=false: РФ-правил и РФ-резолвера нет, кон
   assert.ok(!cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("77.88.0.0/18")));
   // приватные сети мимо туннеля остаются всегда
   assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("10.0.0.0/8")));
-  assert.deepEqual(cfg.dns.servers, ["https://8.8.8.8/dns-query"]);
+  assert.deepEqual(cfg.dns.servers, ["https://dns.google/dns-query", "1.1.1.1"]);
   assert.equal(cfg.dns.queryStrategy, "UseIPv4");
   assert.deepEqual(validateConfig(cfg).errors, []);
 });

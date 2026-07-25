@@ -70,10 +70,22 @@ export function validateConfig(config: XrayConfig): ValidationResult {
       const matches = [...outboundTags].some((tag) => tag.startsWith(s));
       if (!matches) errors.push(`селектор "${s}" балансера "${b.tag}" не матчит ни один outbound`);
     }
+    // Стратегия: осмысленны leastPing и random, случайную строку не пропускаем.
+    // Требовать leastPing ОТ ВСЕХ балансеров нельзя: в боевой конфигурации
+    // резервный тир каскадов идёт с random (все плечи равнозначны, а лишние
+    // пробы через каскад дороги). Спайк golden-diff показал, что такая проверка
+    // отвергала бы реальный рабочий конфиг.
     const strategy = (b.strategy ?? {}) as Record<string, unknown>;
-    if (strategy.type !== "leastPing") {
+    const strategyType = String(strategy.type ?? "");
+    if (strategyType !== "leastPing" && strategyType !== "random") {
       errors.push(
-        `балансер "${b.tag}": strategy.type должен быть "leastPing" (сейчас "${strategy.type ?? "нет"}") — иначе замеры observatory не используются и failover случайный`,
+        `балансер "${b.tag}": strategy.type должен быть "leastPing" или "random" (сейчас "${strategy.type ?? "нет"}")`,
+      );
+    }
+    // Первичный тир обязан мерить задержку — иначе failover направляет трафик наугад.
+    if (b.fallbackTag && strategyType !== "leastPing") {
+      errors.push(
+        `балансер "${b.tag}" с fallbackTag обязан быть leastPing: это первичный тир, он выбирает лучший канал`,
       );
     }
   }
@@ -189,10 +201,13 @@ export function validateConfig(config: XrayConfig): ValidationResult {
   if (privIdx === -1) errors.push("нет правила приватные CIDR → freedom — локальная сеть уедет в туннель");
   if (catchAllIdx === -1) errors.push("нет catch-all правила на балансер — весь незаматченный трафик встанет");
 
+  // Порядок сверен с боевой выдачей действующей панели (спайк golden-diff):
+  // приватные сети идут ПЕРВЫМИ — локальный трафик не должен зависеть ни от
+  // блокировок, ни от РФ-списков; затем блокировки; затем РФ; последним catch-all.
   const order: Array<[string, number]> = [];
-  if (quicIdx !== -1) order.push(["block udp:443", quicIdx]);
-  if (btIdx !== -1) order.push(["block bittorrent", btIdx]);
   if (privIdx !== -1) order.push(["приватные CIDR → freedom", privIdx]);
+  if (btIdx !== -1) order.push(["block bittorrent", btIdx]);
+  if (quicIdx !== -1) order.push(["block udp:443", quicIdx]);
   if (ruIdxs.length) {
     order.push(["РФ → freedom", ruIdxs[0]]);
     if (ruIdxs.length > 1) order.push(["РФ → freedom (последнее)", ruIdxs[ruIdxs.length - 1]]);

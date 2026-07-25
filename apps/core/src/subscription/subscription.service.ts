@@ -82,10 +82,13 @@ export class SubscriptionService {
       // байт-в-байт совместимо с тем, что ждут мигрированные Happ (migration.md P0-2)
       "subscription-userinfo": `upload=0; download=${download}; total=${total}; expire=${expire}`,
       "profile-update-interval": String(this.cfg.profileUpdateIntervalHours),
-      "profile-title": "VPN",
+      // Заголовки с человеческим текстом кодируются base64 с префиксом: в HTTP-заголовке
+      // не может быть кириллицы, а название и объявление у нас на русском.
+      // Формат сверен с боевой выдачей действующей панели (спайк golden-diff).
+      "profile-title": encodeHeaderText(this.cfg.profileTitle),
     };
     if (this.cfg.supportUrl) headers["support-url"] = this.cfg.supportUrl;
-    if (this.cfg.announce) headers["announce"] = this.cfg.announce;
+    if (this.cfg.announce) headers["announce"] = encodeHeaderText(this.cfg.announce);
     return headers;
   }
 
@@ -127,4 +130,16 @@ export class SubscriptionService {
     this.lastAlertAt = now;
     await this.bot.alert(`🚨 Подписка не собирается, клиентам уходит 503\n<code>${reason.slice(0, 300)}</code>`);
   }
+}
+
+/**
+ * Текстовые заголовки подписки клиент ждёт в base64 с префиксом `base64:`.
+ * ASCII-строки отдаём как есть — так делает действующая панель, и лишнее
+ * кодирование ломало бы сравнение при миграции.
+ */
+function encodeHeaderText(value: string): string {
+  if (!value) return value;
+  // eslint-disable-next-line no-control-regex
+  const isAscii = /^[\x20-\x7E]*$/.test(value);
+  return isAscii ? value : `base64:${Buffer.from(value, "utf8").toString("base64")}`;
 }

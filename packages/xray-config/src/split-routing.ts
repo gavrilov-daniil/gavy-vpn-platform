@@ -16,7 +16,9 @@ export const PRIVATE_CIDRS = [
 export const DEFAULT_PROBE_URL = "https://cp.cloudflare.com/generate_204";
 export const DEFAULT_PROBE_INTERVAL = "10s";
 export const RU_DOH = "https://77.88.8.8/dns-query";
-export const INTL_DOH = "https://8.8.8.8/dns-query";
+export const INTL_DOH = "https://dns.google/dns-query";
+/** Запасной plain-DNS: DoH могут порезать вместе с туннелем, без него клиент без резолва. */
+export const PLAIN_DNS_FALLBACK = "1.1.1.1";
 
 export interface SplitRoutingParts {
   /** Правила ДО catch-all (block / private→freedom / RU→freedom). Порядок критичен. */
@@ -24,28 +26,35 @@ export interface SplitRoutingParts {
 }
 
 /**
- * Geo-free split-routing. Порядок = приоритет (первое совпадение выигрывает):
- *   1. udp:443 (QUIC) + bittorrent → block
- *   2. приватные CIDR → freedom
- *   3. РФ: зоны + сервисные домены (+ РФ IP-CIDR) → freedom
+ * Geo-free split-routing. Порядок = приоритет (первое совпадение выигрывает).
+ *
+ * Порядок сверен с боевой выдачей действующей панели (спайк golden-diff):
+ *   1. приватные CIDR → freedom
+ *   2. bittorrent → block
+ *   3. udp:443 (QUIC) → block
+ *   4. РФ: зоны + сервисные домены (+ РФ IP-CIDR) → freedom
  * catch-all (→ балансер) и loopback-реинжект добавляет билдер профиля.
  *
+ * Приватные сети идут ПЕРВЫМИ намеренно: локальный трафик не должен зависеть
+ * ни от блокировок, ни от РФ-списков. Раньше здесь блокировки стояли выше —
+ * это расходилось с проверенной боевой конфигурацией.
+ *
  * ruSplit=false — обратный сценарий («Россия», «Белые списки»): РФ-ресурсы идут
- * ЧЕРЕЗ туннель, поэтому шаг 3 не добавляется вовсе.
+ * ЧЕРЕЗ туннель, поэтому шаг 4 не добавляется вовсе.
  */
 export function buildSplitRoutingHead(list: DomainList, ruSplit = true): SplitRoutingParts {
   const head: Array<Record<string, unknown>> = [];
 
-  // 1. block QUIC + bittorrent (первым — дешёвый барьер)
-  head.push({ type: "field", network: "udp", port: 443, outboundTag: "block" });
-  head.push({ type: "field", protocol: ["bittorrent"], outboundTag: "block" });
-
-  // 2. приватные сети → freedom (напрямую, не в туннель)
+  // 1. приватные сети → freedom (локалка не должна зависеть от прочих правил)
   head.push({ type: "field", ip: PRIVATE_CIDRS, outboundTag: "freedom" });
+
+  // 2-3. дешёвые барьеры: торренты и QUIC
+  head.push({ type: "field", protocol: ["bittorrent"], outboundTag: "block" });
+  head.push({ type: "field", network: "udp", port: 443, outboundTag: "block" });
 
   if (!ruSplit) return { head };
 
-  // 3. РФ-зоны и домены → freedom
+  // 4. РФ-зоны и домены → freedom
   const domains = [
     ...list.zones.map((z) => `domain:${z}`),
     ...list.domains,
@@ -66,8 +75,11 @@ export function buildSplitRoutingHead(list: DomainList, ruSplit = true): SplitRo
  */
 export function buildDns(list: DomainList, ruSplit = true): Record<string, unknown> {
   const ruDomains = [...list.zones.map((z) => `domain:${z}`), ...list.domains];
+  // Третий сервер — обычный plain-DNS: если оба DoH недоступны (а их могут резать
+  // вместе с туннелем), клиент останется без резолва вообще. Так сделано в боевой
+  // конфигурации, сверено спайком golden-diff.
   const servers: Array<unknown> = ruSplit
-    ? [{ address: RU_DOH, domains: ruDomains }, INTL_DOH]
-    : [INTL_DOH];
+    ? [{ address: RU_DOH, domains: ruDomains }, INTL_DOH, PLAIN_DNS_FALLBACK]
+    : [INTL_DOH, PLAIN_DNS_FALLBACK];
   return { servers, queryStrategy: "UseIPv4" };
 }

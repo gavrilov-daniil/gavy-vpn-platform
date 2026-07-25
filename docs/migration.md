@@ -22,9 +22,24 @@
 
 ### 4. Golden-config byte-diff (спайк 1, go/no-go)
 - Перед cutover: сгенерить новую базу для реального мигрированного юзера и **семантически byte-diff'нуть** против текущего Remnawave `/api/sub/<id>/json`.
-- Сверять: список outbounds/каналов, балансер (`leastPing`), top-level observatory (`subjectSelector` = union всех selector), loopback-цепочка (fallbackTag/lo-out/lo-in/routing, последний tier без fallback), split-routing (порядок правил, `freedom`-именование, отсутствие `geoip:`/`geosite:`), split-DNS `UseIPv4`, `sniffing routeOnly:true`.
+- Сверять: список outbounds/каналов, балансеры, top-level observatory (`subjectSelector` = union всех selector), loopback-цепочка (fallbackTag/lo-out/lo-in/routing, последний tier без fallback), split-routing (порядок правил, `freedom`-именование, отсутствие `geoip:`/`geosite:`), split-DNS `UseIPv4`, `sniffing routeOnly:true`.
 - Любой diff — блокер до устранения.
-- Инвариант из `panel.md`: в базовом конфиге ровно **1 видимый host-якорь**, остальные `isHidden` (все видимы → дубли; все скрыты → пустая подписка). Валидатор `xray-config` это проверяет.
+
+#### Что показал первый прогон спайка (сверка с боевой панелью)
+
+Снято read-only с действующей панели. Наши предположения разошлись с реальностью в пяти местах — все исправлены в коде:
+
+| Что | Предполагалось | В бою | Следствие |
+|---|---|---|---|
+| Порядок head-правил | block QUIC → block BT → private → РФ | **private → BT → QUIC → РФ** | приватные сети первыми: локалка не зависит от блокировок и РФ-списков |
+| Стратегия балансера | `leastPing` у всех | tier1 `leastPing`, **tier2 `random`** | требование `leastPing` от всех **отвергало боевой конфиг**; теперь `leastPing` обязателен только для тира с `fallbackTag` |
+| DNS | 2 сервера (РФ DoH + зарубежный) | **3**: РФ DoH + зарубежный + plain `1.1.1.1` | если оба DoH порежут вместе с туннелем, клиент остаётся без резолва |
+| Зарубежный DoH | `8.8.8.8` | `dns.google` | — |
+| `profile-title` / `announce` | простой текст | **`base64:<...>`** | в HTTP-заголовке не бывает кириллицы; без кодирования заголовок битый |
+
+Устройство боевой подписки (8 профилей): «Авто» — 2 тира (5 direct + 5 каскадов через общий front по `dialerProxy`); страновые — 1 тир; **«Россия» и «Белые списки» — вообще без балансера**, catch-all уходит в один именованный outbound, и у них нет РФ-правил (это и есть сценарий `ru_split=false`).
+
+Профиль без балансера (single-outbound) генератором пока не поддержан — нужен до переключения, иначе «Россия» и «Белые списки» не воспроизводятся.
 
 ## Cutover — нода за нодой (две панели не делят одну ноду)
 

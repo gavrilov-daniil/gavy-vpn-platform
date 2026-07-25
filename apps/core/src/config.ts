@@ -6,6 +6,8 @@ export interface CoreConfig {
   profileUpdateIntervalHours: number;
   supportUrl: string;
   announce: string;
+  /** Название подписки в клиенте. Кириллица уедет в base64-заголовок. */
+  profileTitle: string;
   /** Ключ шифрования кредов мерчантов. В БД креды лежат только зашифрованными. */
   secretsMasterKey: string;
   /** Внешний URL API — из него строятся callback_url для платёжных вебхуков. */
@@ -33,6 +35,7 @@ export function loadConfig(): CoreConfig {
     profileUpdateIntervalHours: Number(process.env.SUB_PROFILE_UPDATE_INTERVAL ?? 12),
     supportUrl: process.env.SUB_SUPPORT_URL ?? "",
     announce: process.env.SUB_ANNOUNCE ?? "",
+    profileTitle: process.env.SUB_PROFILE_TITLE ?? "VPN",
     secretsMasterKey: process.env.SECRETS_MASTER_KEY ?? "",
     publicApiUrl: (process.env.PUBLIC_API_URL ?? "http://localhost:3100").replace(/\/+$/, ""),
     paymentSuccessUrl: process.env.PAYMENT_SUCCESS_URL ?? "",
