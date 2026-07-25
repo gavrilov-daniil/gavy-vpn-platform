@@ -12,6 +12,9 @@ function generateShortUuid(): string {
   return randomBytes(12).toString("hex");
 }
 
+/** Соединение или транзакция — читающему хелперу достаточно select. */
+type Selectable = Pick<Database, "select">;
+
 @Injectable()
 export class SubscribersService {
   private readonly log = new Logger(SubscribersService.name);
@@ -81,29 +84,60 @@ export class SubscribersService {
       .onConflictDoNothing()
       .returning();
 
-    // гонка двух параллельных /start — второй запрос перечитывает созданную запись
-    if (!created) {
-      const [row] = await this.db
-        .select()
-        .from(schema.subscriber)
-        .where(
-          and(
-            eq(schema.subscriber.orgId, this.cfg.defaultOrgId),
-            eq(schema.subscriber.telegramId, input.telegramId),
-          ),
-        )
-        .limit(1);
-      return { subscriber: row, created: false };
-    }
+    // гонка двух параллельных /start — второй запрос перечитывает созданную запись.
+    // Дальше он идёт тем же путём, что и выигравший: иначе у подписчика не будет
+    // подписки, а регистрация по рекламной ссылке не засчитается.
+    const subscriber = created ?? (await this.getByTelegramId(input.telegramId));
+    if (!subscriber) throw new NotFoundException(`подписчик ${input.telegramId} не найден после гонки /start`);
 
-    await this.ensureSubscription(created.id);
-    if (link) await this.attribution.onRegistration(created.id, link.id);
-    return { subscriber: created, created: true };
+    await this.ensureSubscription(subscriber.id);
+    if (link) await this.attribution.onRegistration(subscriber.id, link.id);
+    return { subscriber, created: Boolean(created) };
+  }
+
+  private async getByTelegramId(telegramId: number) {
+    const [row] = await this.db
+      .select()
+      .from(schema.subscriber)
+      .where(
+        and(
+          eq(schema.subscriber.orgId, this.cfg.defaultOrgId),
+          eq(schema.subscriber.telegramId, telegramId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
   }
 
   /** У подписчика всегда есть запись подписки — она же держит идентичность в конфиге. */
   async ensureSubscription(subscriberId: string) {
-    const [existing] = await this.db
+    const existing = await this.findSubscription(this.db, subscriberId);
+    if (existing) return existing;
+
+    // Unique-индекса на subscriber_id нет, а параллельные /start зовут ensureSubscription
+    // одновременно — без блокировки у подписчика окажется две подписки (и два URL).
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`subscription:${subscriberId}`}, 0))`);
+
+      const raced = await this.findSubscription(tx, subscriberId);
+      if (raced) return raced;
+
+      const [created] = await tx
+        .insert(schema.subscription)
+        .values({
+          orgId: this.cfg.defaultOrgId,
+          subscriberId,
+          shortUuid: generateShortUuid(),
+          vlessUuid: randomUUID(),
+          status: "inactive",
+        })
+        .returning();
+      return created;
+    });
+  }
+
+  private async findSubscription(db: Selectable, subscriberId: string) {
+    const [row] = await db
       .select()
       .from(schema.subscription)
       .where(
@@ -113,19 +147,7 @@ export class SubscribersService {
         ),
       )
       .limit(1);
-    if (existing) return existing;
-
-    const [created] = await this.db
-      .insert(schema.subscription)
-      .values({
-        orgId: this.cfg.defaultOrgId,
-        subscriberId,
-        shortUuid: generateShortUuid(),
-        vlessUuid: randomUUID(),
-        status: "inactive",
-      })
-      .returning();
-    return created;
+    return row ?? null;
   }
 
   /** Сводка для главного экрана бота. */

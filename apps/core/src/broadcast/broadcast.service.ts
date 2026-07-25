@@ -175,6 +175,49 @@ export class BroadcastService {
     return { ok: true as const, canceled: false, ...counts };
   }
 
+  /**
+   * Возврат в очередь получателей, у которых отправка сорвалась технически (reason='error':
+   * бот лежал, таймаут, 5xx). blocked/skipped не трогаем — там повтор бессмыслен.
+   * Claim в message_log на таких отправках уже снят DispatchService, поэтому прогон
+   * действительно отправит сообщение, а не отбросит его как дубль.
+   */
+  async retryFailed(broadcastId: string) {
+    const broadcast = await this.getRow(broadcastId);
+    if (broadcast.status === "running") {
+      return { ok: false as const, reason: "рассылка выполняется, повтор запустится после её завершения" };
+    }
+
+    const reset = await this.db
+      .update(schema.broadcastRecipient)
+      .set({ status: "pending", reason: null, sentAt: null })
+      .where(
+        and(
+          eq(schema.broadcastRecipient.orgId, this.cfg.defaultOrgId),
+          eq(schema.broadcastRecipient.broadcastId, broadcastId),
+          eq(schema.broadcastRecipient.status, "failed"),
+          eq(schema.broadcastRecipient.reason, "error"),
+        ),
+      )
+      .returning({ id: schema.broadcastRecipient.id });
+
+    if (reset.length === 0) return { ok: true as const, retried: 0 };
+
+    // завершённую рассылку возвращаем в запускаемый статус — run() берёт только draft/scheduled/running
+    await this.db
+      .update(schema.broadcast)
+      .set({ status: "scheduled", finishedAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.broadcast.orgId, this.cfg.defaultOrgId),
+          eq(schema.broadcast.id, broadcastId),
+          inArray(schema.broadcast.status, ["done", "canceled"]),
+        ),
+      );
+
+    this.log.log(`broadcast ${broadcastId}: ${reset.length} получателей возвращены в pending`);
+    return { ok: true as const, retried: reset.length };
+  }
+
   async cancel(broadcastId: string) {
     const [row] = await this.db
       .update(schema.broadcast)

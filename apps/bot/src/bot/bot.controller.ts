@@ -13,6 +13,8 @@ export class BotController {
 
   /**
    * Вебхук Telegram. Секрет проверяется ДО разбора тела: эндпоинт публичный.
+   * Пустой секрет = раздел закрыт целиком (fail-closed): в режиме polling сюда не должен
+   * приходить никто, а в режиме webhook пустой секрет не даст стартовать (см. loadConfig).
    * Ошибка обработки не должна превращаться в не-200 — иначе Telegram уйдёт в ретраи
    * и будет доставлять тот же апдейт по кругу.
    */
@@ -22,7 +24,7 @@ export class BotController {
     @Headers("x-telegram-bot-api-secret-token") secret: string | undefined,
     @Body() update: Update,
   ): Promise<{ ok: true }> {
-    if (this.cfg.webhookSecret && !safeCompare(secret ?? "", this.cfg.webhookSecret)) {
+    if (!this.cfg.webhookSecret || !safeCompare(secret ?? "", this.cfg.webhookSecret)) {
       throw new UnauthorizedException();
     }
 

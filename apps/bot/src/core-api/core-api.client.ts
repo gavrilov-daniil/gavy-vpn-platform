@@ -97,7 +97,7 @@ export class CoreApiClient {
   }
 
   listPaymentMethods(purpose: "topup" | "plan" | "gift"): Promise<PaymentMethodDto[]> {
-    return this.get<PaymentMethodDto[]>(`/v1/payments/methods/${purpose}`);
+    return this.get<PaymentMethodDto[]>(`/internal/payments/methods/${purpose}`);
   }
 
   createPayment(
@@ -111,7 +111,7 @@ export class CoreApiClient {
     },
     clientRequestId: string,
   ): Promise<CreatedPaymentDto> {
-    return this.post<CreatedPaymentDto>("/v1/payments/create", input, clientRequestId);
+    return this.post<CreatedPaymentDto>("/internal/payments/create", input, clientRequestId);
   }
 
   getOverview(subscriberId: string): Promise<OverviewDto> {

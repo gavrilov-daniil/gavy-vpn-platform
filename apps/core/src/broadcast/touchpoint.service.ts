@@ -10,7 +10,8 @@ export type TriggerKey = (typeof TRIGGER_KEYS)[number];
 
 /**
  * Окно попадания в триггер. Без него условие «триал старше N часов» держится вечно
- * и касание уходило бы каждый день. Прогон раз в сутки + окно 24ч = ровно одно попадание.
+ * и цель попадала бы в выборку бесконечно. Окно ограничивает выборку, а от повторной
+ * отправки защищает dedup_key (см. anchorSql).
  */
 const WINDOW_HOURS = 24;
 const SEND_PAUSE_MS = 50;
@@ -94,7 +95,7 @@ export class TouchpointService {
     return row;
   }
 
-  /** Вызывается по расписанию (раз в час/сутки). Дедуп — суточный bucket в dedup_key. */
+  /** Вызывается по расписанию (раз в час). Дедуп — якорь самого триггера в dedup_key. */
   async runTouchpoints() {
     const rows = await this.db
       .select()
@@ -112,7 +113,6 @@ export class TouchpointService {
     }
 
     const targets = await this.findTargets(tp);
-    const bucket = new Date().toISOString().slice(0, 10);
     const counts = { targets: targets.length, sent: 0, duplicate: 0, failed: 0 };
 
     for (const target of targets) {
@@ -121,7 +121,7 @@ export class TouchpointService {
         telegramId: target.telegramId,
         kind: "touchpoint",
         refId: tp.id,
-        dedupKey: `touchpoint:${tp.id}:${target.subscriberId}:${bucket}`,
+        dedupKey: `touchpoint:${tp.id}:${target.subscriberId}:${target.anchor}`,
         bodyHtml: tp.bodyHtml,
         buttons: tp.buttons,
       });
@@ -145,7 +145,11 @@ export class TouchpointService {
     }
 
     const rows = await this.db
-      .selectDistinct({ subscriberId: schema.subscriber.id, telegramId: schema.subscriber.telegramId })
+      .selectDistinct({
+        subscriberId: schema.subscriber.id,
+        telegramId: schema.subscriber.telegramId,
+        anchor: this.anchorSql(tp.triggerKey as TriggerKey),
+      })
       .from(schema.subscriber)
       .leftJoin(schema.subscription, eq(schema.subscription.subscriberId, schema.subscriber.id))
       .where(
@@ -159,8 +163,23 @@ export class TouchpointService {
       );
 
     return rows
-      .filter((r): r is { subscriberId: string; telegramId: number } => r.telegramId !== null)
-      .map((r) => ({ subscriberId: r.subscriberId, telegramId: r.telegramId }));
+      .filter((r): r is { subscriberId: string; telegramId: number; anchor: string } => r.telegramId !== null)
+      .map((r) => ({ subscriberId: r.subscriberId, telegramId: r.telegramId, anchor: r.anchor }));
+  }
+
+  /**
+   * Bucket дедупа — «якорь» самого триггера, а не календарная дата. С датой окно в 24ч,
+   * пересекающее полночь UTC, попадало в выборку в двух разных днях и давало два ключа,
+   * то есть два сообщения одному человеку на каждое касание.
+   * Якорь неизменен внутри одного цикла и меняется на следующем, поэтому:
+   *   trial_no_payment — ровно один раз (trial_used_at ставится однажды и не переписывается);
+   *   expires_soon / expired_recently — один раз на каждый expire_at, то есть касание
+   *   штатно повторяется после продления и не повторяется в пределах одного срока.
+   */
+  private anchorSql(triggerKey: TriggerKey): SQL<string> {
+    const column =
+      triggerKey === "trial_no_payment" ? schema.subscriber.trialUsedAt : schema.subscription.expireAt;
+    return sql<string>`coalesce(extract(epoch from ${column})::bigint::text, 'none')`;
   }
 
   private triggerFilters(tp: typeof schema.touchpoint.$inferSelect): SQL[] | null {

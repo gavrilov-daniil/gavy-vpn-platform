@@ -17,11 +17,18 @@ export function loadConfig(): BotConfig {
   const botToken = process.env.BOT_TOKEN ?? "";
   if (!botToken) throw new Error("BOT_TOKEN не задан");
 
+  const webhookUrl = (process.env.BOT_WEBHOOK_URL ?? "").replace(/\/+$/, "");
+  const webhookSecret = process.env.BOT_WEBHOOK_SECRET ?? "";
+  // Вебхук без секрета — открытый POST /tg: кто угодно подделает апдейт от чужого tgId.
+  if (webhookUrl && !webhookSecret) {
+    throw new Error("BOT_WEBHOOK_SECRET обязателен при заданном BOT_WEBHOOK_URL");
+  }
+
   return {
     port: Number(process.env.BOT_PORT ?? 3300),
     botToken,
-    webhookUrl: (process.env.BOT_WEBHOOK_URL ?? "").replace(/\/+$/, ""),
-    webhookSecret: process.env.BOT_WEBHOOK_SECRET ?? "",
+    webhookUrl,
+    webhookSecret,
     coreApiUrl: (process.env.CORE_API_URL ?? "http://localhost:3100").replace(/\/+$/, ""),
     serviceToken: process.env.SERVICE_TOKEN ?? "",
     adminBotToken: process.env.ADMIN_BOT_TOKEN ?? "",

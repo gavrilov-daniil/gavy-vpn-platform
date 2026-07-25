@@ -56,6 +56,18 @@ export class BroadcastAdminController {
     return { started: true };
   }
 
+  /** Повтор для тех, у кого отправка сорвалась технически. Прогон — тоже фоном, как и run. */
+  @Post("broadcasts/:id/retry-failed")
+  async retryFailed(@Param("id") id: string) {
+    const result = await this.broadcasts.retryFailed(id);
+    if (!result.ok || result.retried === 0) return { ...result, started: false };
+
+    void this.broadcasts
+      .run(id)
+      .catch((err) => this.log.error(`broadcast ${id} упал: ${err instanceof Error ? err.message : String(err)}`));
+    return { ...result, started: true };
+  }
+
   @Post("broadcasts/:id/cancel")
   cancel(@Param("id") id: string) {
     return this.broadcasts.cancel(id);

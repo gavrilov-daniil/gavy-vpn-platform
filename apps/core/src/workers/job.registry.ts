@@ -8,6 +8,7 @@ import { ReferralRewardPromoteJob } from "./jobs/referral-reward-promote.job.js"
 import { NodeReconcileSweepJob } from "./jobs/node-reconcile-sweep.job.js";
 import { TouchpointsRunJob } from "./jobs/touchpoints-run.job.js";
 import { BroadcastResumeJob } from "./jobs/broadcast-resume.job.js";
+import { PaymentReconcileJob } from "./jobs/payment-reconcile.job.js";
 
 export interface JobRunRecord {
   startedAt: Date;
@@ -37,6 +38,7 @@ export class JobRegistry {
     nodeReconcileSweep: NodeReconcileSweepJob,
     touchpointsRun: TouchpointsRunJob,
     broadcastResume: BroadcastResumeJob,
+    paymentReconcile: PaymentReconcileJob,
   ) {
     const runners: JobRunner[] = [
       subscriptionExpire,
@@ -46,6 +48,7 @@ export class JobRegistry {
       nodeReconcileSweep,
       touchpointsRun,
       broadcastResume,
+      paymentReconcile,
     ];
     for (const runner of runners) this.runners.set(runner.jobName, runner);
   }

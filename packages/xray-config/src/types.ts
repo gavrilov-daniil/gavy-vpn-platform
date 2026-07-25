@@ -46,6 +46,12 @@ export interface ProfileInput {
   isAuto?: boolean;
   primary: string[]; // теги каналов tier1
   fallback: string[]; // теги каналов tier2 (может быть пусто → один тир)
+  /**
+   * Выводить ли РФ-трафик мимо туннеля (default true).
+   * false — для профилей вида «Россия» / «Белые списки», где РФ-ресурсы нужны
+   * ЧЕРЕЗ туннель: правила РФ-доменов/CIDR не добавляются, DNS не разводится.
+   */
+  ruSplit?: boolean;
 }
 
 export interface GeneratorInput {

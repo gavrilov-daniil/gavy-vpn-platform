@@ -42,11 +42,8 @@ export class BotService implements OnModuleInit, OnModuleDestroy {
     this.registerHandlers();
 
     if (this.cfg.webhookUrl) {
-      if (!this.cfg.webhookSecret) {
-        this.log.warn("BOT_WEBHOOK_SECRET пуст: POST /tg примет апдейт от кого угодно");
-      }
       await this.bot.api.setWebhook(this.cfg.webhookUrl, {
-        secret_token: this.cfg.webhookSecret || undefined,
+        secret_token: this.cfg.webhookSecret,
         allowed_updates: [...ALLOWED_UPDATES],
         // false: апдейты, накопившиеся за деплой, — это оплаты и обращения, терять их нельзя
         drop_pending_updates: false,

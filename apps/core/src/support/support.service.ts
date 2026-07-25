@@ -36,9 +36,27 @@ export class SupportService {
    *   support_contact_uq  — контакт один на (org, telegram_user_id);
    *   conversation_open_uq — незакрытый диалог у контакта один (partial unique);
    *   message_tg_update_uq — повторная доставка апдейта Telegram не задваивает сообщение.
+   * Порядок важен: дедуп апдейта проверяется до диалога, иначе повтор плодит пустые диалоги.
    */
   async handleInbound(input: InboundInput) {
     const contact = await this.upsertContact(input);
+
+    // Дедуп ДО работы с диалогом: повторная доставка апдейта на закрытом диалоге
+    // иначе открывала новый — пустой, без единого сообщения.
+    if (input.telegramUpdateId != null) {
+      const [seen] = await this.db
+        .select({ id: schema.message.id, conversationId: schema.message.conversationId })
+        .from(schema.message)
+        .where(
+          and(
+            eq(schema.message.orgId, this.cfg.defaultOrgId),
+            eq(schema.message.telegramUpdateId, input.telegramUpdateId),
+          ),
+        )
+        .limit(1);
+      if (seen) return { deduped: true as const, conversationId: seen.conversationId, contactId: contact.id };
+    }
+
     const conversation = await this.openConversation(contact.id);
 
     const inserted = await this.db
@@ -57,7 +75,7 @@ export class SupportService {
       .returning();
 
     if (inserted.length === 0) {
-      // тот же update_id уже записан — Telegram переслал апдейт, это не ошибка
+      // гонка: тот же update_id записал параллельный запрос, диалог у него тот же
       return { deduped: true as const, conversationId: conversation.id, contactId: contact.id };
     }
 

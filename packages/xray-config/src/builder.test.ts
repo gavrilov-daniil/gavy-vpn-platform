@@ -81,6 +81,146 @@ test("валидатор ловит последний tier с fallbackTag (пе
   assert.equal(res.ok, false);
 });
 
+test("ruSplit по умолчанию: РФ-домены и РФ-CIDR идут в freedom, DNS разведён на РФ-резолвер", () => {
+  const cfg = buildProfileConfig(fixture(), { remark: "🇩🇪 Германия", primary: ["de-direct"], fallback: [] }) as any;
+  assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.domain) && r.domain.includes("domain:ru")));
+  assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("77.88.0.0/18")));
+  assert.equal(cfg.dns.servers.length, 2);
+  assert.deepEqual(validateConfig(cfg).errors, []);
+});
+
+test("ruSplit=false: РФ-правил и РФ-резолвера нет, конфиг остаётся валидным", () => {
+  const profile: ProfileInput = { remark: "🇷🇺 Россия", primary: ["de-direct"], fallback: [], ruSplit: false };
+  const cfg = buildProfileConfig(fixture(), profile) as any;
+  assert.ok(!cfg.routing.rules.some((r: any) => Array.isArray(r.domain)));
+  assert.ok(!cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("77.88.0.0/18")));
+  // приватные сети мимо туннеля остаются всегда
+  assert.ok(cfg.routing.rules.some((r: any) => Array.isArray(r.ip) && r.ip.includes("10.0.0.0/8")));
+  assert.deepEqual(cfg.dns.servers, ["https://8.8.8.8/dns-query"]);
+  assert.equal(cfg.dns.queryStrategy, "UseIPv4");
+  assert.deepEqual(validateConfig(cfg).errors, []);
+});
+
+test("валидатор ловит перестановку head-правил (РФ раньше приватных сетей)", () => {
+  const cfg = assembleBase(fixture()) as any;
+  const rules = cfg.routing.rules as any[];
+  const privIdx = rules.findIndex((r) => Array.isArray(r.ip) && r.ip.includes("10.0.0.0/8"));
+  const ruIdx = rules.findIndex((r) => Array.isArray(r.domain));
+  [rules[privIdx], rules[ruIdx]] = [rules[ruIdx], rules[privIdx]];
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("порядок split-routing")));
+});
+
+test("валидатор ловит catch-all перед РФ-правилами и правила после catch-all", () => {
+  const cfg = assembleBase(fixture()) as any;
+  const rules = cfg.routing.rules as any[];
+  rules.unshift(rules.pop()); // catch-all в начало
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("порядок split-routing")));
+  assert.ok(res.errors.some((e) => e.includes("недостижимы")));
+});
+
+test("валидатор ловит потерю block-правил и catch-all", () => {
+  const cfg = assembleBase(fixture()) as any;
+  cfg.routing.rules = cfg.routing.rules.filter(
+    (r: any) => r.outboundTag !== "block" && !(r.balancerTag && !r.inboundTag),
+  );
+  const errs = validateConfig(cfg).errors;
+  assert.ok(errs.some((e) => e.includes("block udp:443")));
+  assert.ok(errs.some((e) => e.includes("bittorrent")));
+  assert.ok(errs.some((e) => e.includes("catch-all")));
+});
+
+test("валидатор требует sniffing.routeOnly на пользовательских inbound", () => {
+  const cfg = assembleBase(fixture()) as any;
+  assert.equal(validateConfig(cfg).ok, true);
+  cfg.inbounds.find((i: any) => i.tag === "socks-in").sniffing = { enabled: true, destOverride: ["http", "tls"] };
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("routeOnly")));
+});
+
+test("валидатор требует dns.queryStrategy=UseIPv4", () => {
+  const cfg = assembleBase(fixture()) as any;
+  cfg.dns.queryStrategy = "UseIP";
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("UseIPv4")));
+});
+
+test("валидатор запрещает burstObservatory (баг Xray #5897)", () => {
+  const cfg = assembleBase(fixture()) as any;
+  cfg.burstObservatory = { subjectSelector: ["de-direct"] };
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("burstObservatory")));
+});
+
+test("валидатор требует strategy.type=leastPing у каждого балансера", () => {
+  const cfg = assembleBase(fixture()) as any;
+  cfg.routing.balancers[0].strategy = { type: "random" };
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("leastPing")));
+});
+
+test("валидатор требует https в observatory.probeUrl", () => {
+  const input = fixture();
+  assert.equal(validateConfig(assembleBase(input)).ok, true);
+  const cfg = assembleBase({ ...input, probeUrl: "http://cp.cloudflare.com/generate_204" }) as any;
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("probeUrl")));
+});
+
+test("валидатор ловит потерю flow на любом плече каскада", () => {
+  const input = fixture();
+  const profile: ProfileInput = { remark: "PL", primary: ["pl-direct"], fallback: ["pl-cascade"] };
+
+  const brokenClone = buildProfileConfig(input, profile) as any;
+  brokenClone.outbounds.find((o: any) => o.tag === "pl-cascade").settings.vnext[0].users[0].flow = "";
+  assert.ok(validateConfig(brokenClone).errors.some((e) => e.includes("pl-cascade")));
+
+  const brokenFront = buildProfileConfig(input, profile) as any;
+  brokenFront.outbounds.find((o: any) => o.tag === "frontru2").settings.vnext[0].users[0].flow = "";
+  assert.ok(validateConfig(brokenFront).errors.some((e) => e.includes("frontru2")));
+});
+
+test("flow: пустой на tcp+reality — ошибка, на grpc пустой — норма", () => {
+  const input = fixture();
+  input.channels.push({
+    kind: "direct",
+    tag: "nl-grpc",
+    cc: "NL",
+    host: {
+      address: "3.3.3.3", port: 443, sni: "ads.x5.ru", fingerprint: "firefox",
+      pbk: "PBK_NL", sid: "nl01", flow: "", network: "grpc",
+    },
+  });
+
+  const grpc = buildProfileConfig(input, { remark: "NL", primary: ["nl-grpc"], fallback: [] });
+  assert.deepEqual(validateConfig(grpc).errors, []);
+
+  const tcp = buildProfileConfig(input, { remark: "DE", primary: ["de-direct"], fallback: [] }) as any;
+  tcp.outbounds.find((o: any) => o.tag === "de-direct").settings.vnext[0].users[0].flow = "";
+  assert.ok(validateConfig(tcp).errors.some((e) => e.includes("Vision")));
+});
+
+test("валидатор ловит префиксную коллизию селекторов разных балансеров", () => {
+  const input = fixture();
+  const cfg = buildProfileConfig(input, { remark: "PL", primary: ["pl-direct"], fallback: ["pl-cascade"] }) as any;
+  assert.equal(validateConfig(cfg).ok, true);
+
+  // тег "pl" в tier1 префиксно захватывает и pl-cascade из tier2
+  cfg.routing.balancers.find((b: any) => b.tag === "tier1").selector = ["pl"];
+  cfg.observatory.subjectSelector = ["pl", "pl-cascade"];
+  const res = validateConfig(cfg);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes("вырождаются")));
+});
+
 test("projectVariants отдаёт массив с remark на профиль", () => {
   const input = fixture();
   const profiles: ProfileInput[] = [

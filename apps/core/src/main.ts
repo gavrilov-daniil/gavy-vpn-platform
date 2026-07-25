@@ -11,6 +11,18 @@ async function bootstrap() {
   const cfg = loadConfig();
   const log = new Logger("bootstrap");
 
+  // Ключ шифрования кредов мерчантов. Дефолта тут быть не может: со значением
+  // из публичного репозитория дамп БД расшифровывается кем угодно. Падаем сразу,
+  // а не после того, как боевые ключи лягут «зашифрованными» известным ключом.
+  if (!cfg.secretsMasterKey) {
+    log.error("SECRETS_MASTER_KEY не задан — креды мерчантов шифровать нечем");
+    process.exit(1);
+  }
+  if (cfg.secretsMasterKey.length < 16) {
+    log.error("SECRETS_MASTER_KEY короче 16 символов — так шифровать боевые ключи нельзя");
+    process.exit(1);
+  }
+
   if (cfg.instanceType === "worker") {
     // тот же контекст, что у api, но без HTTP: консьюмер очереди + cron-эмиттер на лидере
     const ctx = await NestFactory.createApplicationContext(AppModule);

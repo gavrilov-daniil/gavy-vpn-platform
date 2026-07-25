@@ -1,9 +1,35 @@
-import type { XrayConfig } from "./types.js";
+import { VISION, type XrayConfig } from "./types.js";
+import { PRIVATE_CIDRS } from "./split-routing.js";
 
 export interface ValidationResult {
   ok: boolean;
   errors: string[];
 }
+
+type Rule = Record<string, unknown>;
+
+function arr(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : [];
+}
+
+function strings(v: unknown): string[] {
+  return arr(v).map(String);
+}
+
+const isBlockQuic = (r: Rule) =>
+  r.outboundTag === "block" && String(r.network ?? "").includes("udp") && String(r.port ?? "") === "443";
+
+const isBlockBittorrent = (r: Rule) => r.outboundTag === "block" && strings(r.protocol).includes("bittorrent");
+
+const isPrivateIp = (r: Rule) =>
+  r.outboundTag === "freedom" && strings(r.ip).some((c) => PRIVATE_CIDRS.includes(c));
+
+// РФ-плечо split-routing: любой freedom по домену/IP, кроме правила приватных сетей
+const isRuDirect = (r: Rule) =>
+  r.outboundTag === "freedom" && !isPrivateIp(r) && (arr(r.domain).length > 0 || arr(r.ip).length > 0);
+
+const isCatchAll = (r: Rule) =>
+  Boolean(r.balancerTag) && !r.domain && !r.ip && !r.inboundTag && !r.protocol && !r.port;
 
 /**
  * Инвариант-валидатор. Нарушение любого пункта = молчаливый отвал клиента,
@@ -15,7 +41,7 @@ export function validateConfig(config: XrayConfig): ValidationResult {
   const outbounds = (config.outbounds ?? []) as Array<Record<string, unknown>>;
   const inbounds = (config.inbounds ?? []) as Array<Record<string, unknown>>;
   const balancers = (routing.balancers ?? []) as Array<Record<string, unknown>>;
-  const rules = (routing.rules ?? []) as Array<Record<string, unknown>>;
+  const rules = (routing.rules ?? []) as Rule[];
   const outboundTags = new Set(outbounds.map((o) => String(o.tag)));
 
   // 1. никаких geoip:/geosite: (валят XrayCore в Happ)
@@ -32,7 +58,7 @@ export function validateConfig(config: XrayConfig): ValidationResult {
   // 3. селектор балансера префиксный: ни один префикс не должен цеплять "freedom",
   //    и каждый элемент селектора должен резолвиться в существующий outbound.
   for (const b of balancers) {
-    const sel = (b.selector ?? []) as string[];
+    const sel = strings(b.selector);
     // балансер без кандидатов = у клиента просто нет интернета, и он об этом не узнает
     if (sel.length === 0) {
       errors.push(`балансер "${b.tag}" с пустым селектором — трафику некуда идти`);
@@ -44,6 +70,30 @@ export function validateConfig(config: XrayConfig): ValidationResult {
       const matches = [...outboundTags].some((tag) => tag.startsWith(s));
       if (!matches) errors.push(`селектор "${s}" балансера "${b.tag}" не матчит ни один outbound`);
     }
+    const strategy = (b.strategy ?? {}) as Record<string, unknown>;
+    if (strategy.type !== "leastPing") {
+      errors.push(
+        `балансер "${b.tag}": strategy.type должен быть "leastPing" (сейчас "${strategy.type ?? "нет"}") — иначе замеры observatory не используются и failover случайный`,
+      );
+    }
+  }
+
+  // 3b. префиксная коллизия между балансерами: тег, попавший в оба селектора,
+  //     схлопывает тиры в один (tier1 "de" захватывает "de-cascade" из tier2) — failover исчезает молча.
+  for (let i = 0; i < balancers.length; i++) {
+    for (let j = i + 1; j < balancers.length; j++) {
+      const selA = strings(balancers[i].selector);
+      const selB = strings(balancers[j].selector);
+      for (const tag of outboundTags) {
+        const hitA = selA.find((s) => tag.startsWith(s));
+        const hitB = selB.find((s) => tag.startsWith(s));
+        if (hitA !== undefined && hitB !== undefined) {
+          errors.push(
+            `outbound "${tag}" захвачен селекторами "${hitA}" (балансер "${balancers[i].tag}") и "${hitB}" (балансер "${balancers[j].tag}") — тиры вырождаются в один, failover исчезает`,
+          );
+        }
+      }
+    }
   }
 
   // 4. loopback-цепочка целостна; последний tier — без fallbackTag
@@ -54,6 +104,7 @@ export function validateConfig(config: XrayConfig): ValidationResult {
   const dokodemoByTag = new Map(
     inbounds.filter((i) => i.protocol === "dokodemo-door").map((i) => [String(i.tag), i]),
   );
+  const catchAllIdx = rules.findIndex(isCatchAll);
   let terminalCount = 0;
   for (const b of balancers) {
     const fb = b.fallbackTag as string | undefined;
@@ -79,11 +130,13 @@ export function validateConfig(config: XrayConfig): ValidationResult {
     if (!net.includes("tcp") || !net.includes("udp")) {
       errors.push(`dokodemo "${loInTag}" network должен быть "tcp,udp" (сейчас "${net}")`);
     }
-    const reinject = rules.find(
-      (r) => Array.isArray(r.inboundTag) && (r.inboundTag as string[]).includes(loInTag) && r.balancerTag,
+    const reinjectIdx = rules.findIndex(
+      (r) => strings(r.inboundTag).includes(loInTag) && Boolean(r.balancerTag),
     );
-    if (!reinject) {
+    if (reinjectIdx === -1) {
       errors.push(`нет routing-rule inboundTag:["${loInTag}"] → следующий tier (loopback молча сломан)`);
+    } else if (catchAllIdx !== -1 && reinjectIdx > catchAllIdx) {
+      errors.push(`реинжект inboundTag:["${loInTag}"] стоит после catch-all — до него трафик не дойдёт, tier2 мёртв`);
     }
   }
   if (balancers.length > 0 && terminalCount === 0) {
@@ -97,22 +150,105 @@ export function validateConfig(config: XrayConfig): ValidationResult {
     }
   }
 
-  // 6. observatory top-level, subjectSelector ⊇ union всех selector
+  // 6. observatory top-level, subjectSelector ⊇ union всех selector, probeUrl по https
+  if (config.burstObservatory) {
+    errors.push("burstObservatory не использовать (баг Xray #5897) — только top-level observatory");
+  }
   const obs = config.observatory as Record<string, unknown> | undefined;
   if (!obs) {
     errors.push("нет top-level observatory (burstObservatory не использовать — баг Xray #5897)");
   } else {
-    const subj = new Set((obs.subjectSelector ?? []) as string[]);
+    const subj = new Set(strings(obs.subjectSelector));
     for (const b of balancers) {
-      for (const s of (b.selector ?? []) as string[]) {
+      for (const s of strings(b.selector)) {
         if (!subj.has(s)) errors.push(`observatory.subjectSelector не содержит "${s}" — забытая нода не меряется`);
       }
+    }
+    const probeUrl = String(obs.probeUrl ?? "");
+    if (!probeUrl.startsWith("https://")) {
+      errors.push(
+        `observatory.probeUrl должен быть https (сейчас "${probeUrl}") — на http провайдерская заглушка засчитается за живую ноду`,
+      );
     }
   }
 
   // 7. domainStrategy AsIs
   if (routing.domainStrategy && routing.domainStrategy !== "AsIs") {
     errors.push(`routing.domainStrategy должен быть "AsIs" (сейчас "${routing.domainStrategy}")`);
+  }
+
+  // 8. порядок head-правил: block → приватные CIDR → РФ → catch-all.
+  //    Регресс порядка не ломает конфиг синтаксически: рунет просто уезжает в туннель (или наоборот).
+  const quicIdx = rules.findIndex(isBlockQuic);
+  const btIdx = rules.findIndex(isBlockBittorrent);
+  const privIdx = rules.findIndex(isPrivateIp);
+  const ruIdxs = rules.map((r, i) => (isRuDirect(r) ? i : -1)).filter((i) => i >= 0);
+
+  if (quicIdx === -1) errors.push("нет правила block udp:443 — QUIC пойдёт мимо split-routing");
+  if (btIdx === -1) errors.push("нет правила block bittorrent");
+  if (privIdx === -1) errors.push("нет правила приватные CIDR → freedom — локальная сеть уедет в туннель");
+  if (catchAllIdx === -1) errors.push("нет catch-all правила на балансер — весь незаматченный трафик встанет");
+
+  const order: Array<[string, number]> = [];
+  if (quicIdx !== -1) order.push(["block udp:443", quicIdx]);
+  if (btIdx !== -1) order.push(["block bittorrent", btIdx]);
+  if (privIdx !== -1) order.push(["приватные CIDR → freedom", privIdx]);
+  if (ruIdxs.length) {
+    order.push(["РФ → freedom", ruIdxs[0]]);
+    if (ruIdxs.length > 1) order.push(["РФ → freedom (последнее)", ruIdxs[ruIdxs.length - 1]]);
+  }
+  if (catchAllIdx !== -1) order.push(["catch-all → балансер", catchAllIdx]);
+  for (let i = 1; i < order.length; i++) {
+    if (order[i][1] < order[i - 1][1]) {
+      errors.push(`порядок split-routing нарушен: "${order[i][0]}" стоит раньше "${order[i - 1][0]}"`);
+    }
+  }
+  if (catchAllIdx !== -1 && catchAllIdx !== rules.length - 1) {
+    errors.push(`правила после catch-all (индекс ${catchAllIdx} из ${rules.length}) недостижимы`);
+  }
+
+  // 9. sniffing.routeOnly на пользовательских inbound: без него Xray подменяет адрес
+  //    назначения на сниффнутый домен — ломается direct-матч по IP и рвётся Reality/Vision.
+  for (const i of inbounds) {
+    if (i.protocol !== "socks" && i.protocol !== "http") continue;
+    const sn = (i.sniffing ?? {}) as Record<string, unknown>;
+    if (sn.enabled !== true) {
+      errors.push(`inbound "${i.tag}": sniffing выключен — домены не определятся, split-routing развалится`);
+    } else if (sn.routeOnly !== true) {
+      errors.push(`inbound "${i.tag}": sniffing.routeOnly !== true — подмена адреса назначения рвёт Reality/Vision`);
+    }
+  }
+
+  // 10. queryStrategy UseIPv4 — иначе AAAA-ответы уходят мимо split-routing
+  const dns = config.dns as Record<string, unknown> | undefined;
+  if (!dns) {
+    errors.push("нет секции dns");
+  } else if (dns.queryStrategy !== "UseIPv4") {
+    errors.push(`dns.queryStrategy должен быть "UseIPv4" (сейчас "${dns.queryStrategy}") — AAAA утечёт мимо split-routing`);
+  }
+
+  // 11. flow: на tcp+reality обязателен Vision (пустой рвёт хендшейк после VLESS-хедера,
+  //     в т.ч. на ОБОИХ плечах каскада), на grpc/xhttp — наоборот, обязан быть пустым.
+  for (const o of outbounds) {
+    if (o.protocol !== "vless") continue;
+    const stream = (o.streamSettings ?? {}) as Record<string, unknown>;
+    const network = String(stream.network ?? "tcp");
+    const visionExpected = network === "tcp" && stream.security === "reality";
+    for (const v of arr((o.settings as Record<string, unknown>)?.vnext) as Array<Record<string, unknown>>) {
+      for (const u of arr(v.users) as Array<Record<string, unknown>>) {
+        const flow = String(u.flow ?? "");
+        if (visionExpected && flow !== VISION) {
+          errors.push(`outbound "${o.tag}": на tcp+reality flow должен быть "${VISION}" (сейчас "${flow}") — Vision-хендшейк порвётся`);
+        }
+        if (!visionExpected && flow) {
+          errors.push(`outbound "${o.tag}": на ${network} flow должен быть пустым (сейчас "${flow}")`);
+        }
+      }
+    }
+    const dialerProxy = ((stream.sockopt ?? {}) as Record<string, unknown>).dialerProxy;
+    if (dialerProxy && !outboundTags.has(String(dialerProxy))) {
+      errors.push(`outbound "${o.tag}": dialerProxy="${dialerProxy}" не существует — каскад никуда не подключится`);
+    }
   }
 
   return { ok: errors.length === 0, errors };

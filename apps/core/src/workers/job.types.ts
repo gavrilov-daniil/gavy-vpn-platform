@@ -6,6 +6,7 @@ export const JOB_NAMES = [
   "node-reconcile-sweep",
   "touchpoints-run",
   "broadcast-resume",
+  "payment-reconcile",
 ] as const;
 
 export type JobName = (typeof JOB_NAMES)[number];

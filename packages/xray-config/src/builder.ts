@@ -119,7 +119,8 @@ export function buildProfileConfig(input: GeneratorInput, profile: ProfileInput)
   }
 
   // --- routing rules ---
-  const { head } = buildSplitRoutingHead(input.domainList);
+  const ruSplit = profile.ruSplit !== false;
+  const { head } = buildSplitRoutingHead(input.domainList, ruSplit);
   const rules = [...head];
   if (hasFallback) {
     // loopback-реинжект ДО catch-all
@@ -137,7 +138,7 @@ export function buildProfileConfig(input: GeneratorInput, profile: ProfileInput)
 
   return {
     log: { loglevel: "warning" },
-    dns: buildDns(input.domainList),
+    dns: buildDns(input.domainList, ruSplit),
     inbounds,
     outbounds,
     routing: { domainStrategy: "AsIs", balancers, rules },

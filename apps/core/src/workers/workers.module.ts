@@ -16,6 +16,7 @@ import { ReferralRewardPromoteJob } from "./jobs/referral-reward-promote.job.js"
 import { NodeReconcileSweepJob } from "./jobs/node-reconcile-sweep.job.js";
 import { TouchpointsRunJob } from "./jobs/touchpoints-run.job.js";
 import { BroadcastResumeJob } from "./jobs/broadcast-resume.job.js";
+import { PaymentReconcileJob } from "./jobs/payment-reconcile.job.js";
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { BroadcastResumeJob } from "./jobs/broadcast-resume.job.js";
     NodeReconcileSweepJob,
     TouchpointsRunJob,
     BroadcastResumeJob,
+    PaymentReconcileJob,
     JobRegistry,
   ],
   exports: [QueueService, SchedulerService, JobRegistry],

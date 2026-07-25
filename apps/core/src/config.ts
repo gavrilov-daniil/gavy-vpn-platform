@@ -33,7 +33,7 @@ export function loadConfig(): CoreConfig {
     profileUpdateIntervalHours: Number(process.env.SUB_PROFILE_UPDATE_INTERVAL ?? 12),
     supportUrl: process.env.SUB_SUPPORT_URL ?? "",
     announce: process.env.SUB_ANNOUNCE ?? "",
-    secretsMasterKey: process.env.SECRETS_MASTER_KEY ?? "dev-master-key-change-me",
+    secretsMasterKey: process.env.SECRETS_MASTER_KEY ?? "",
     publicApiUrl: (process.env.PUBLIC_API_URL ?? "http://localhost:3100").replace(/\/+$/, ""),
     paymentSuccessUrl: process.env.PAYMENT_SUCCESS_URL ?? "",
     paymentFailUrl: process.env.PAYMENT_FAIL_URL ?? "",

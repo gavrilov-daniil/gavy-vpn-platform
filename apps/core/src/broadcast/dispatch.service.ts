@@ -32,6 +32,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Одна отправка «в бота» с барьером идемпотентности.
  * Запись в message_log делается ДО отправки и служит claim'ом: конфликт по dedup_key
  * означает, что этот адресат уже взят (другим воркером или прошлым запуском) — выходим.
+ * Claim снимается, если отправка не состоялась не по вине адресата, — строка живёт
+ * только как факт доставки (или как след блокировки бота).
  */
 @Injectable()
 export class DispatchService {
@@ -92,14 +94,23 @@ export class DispatchService {
             and(eq(schema.subscriber.orgId, this.cfg.defaultOrgId), eq(schema.subscriber.id, input.subscriberId)),
           );
         this.log.warn(`subscriber ${input.subscriberId} заблокировал бота, помечен tg_blocked`);
+
+        await this.db
+          .update(schema.messageLog)
+          .set({ status: "failed", error })
+          .where(eq(schema.messageLog.id, logId));
+
+        return { outcome: "blocked", error };
       }
 
-      await this.db
-        .update(schema.messageLog)
-        .set({ status: "failed", error })
-        .where(eq(schema.messageLog.id, logId));
+      // Сообщение не ушло — снимаем claim, иначе dedup_key навсегда закрывает повтор
+      // этому адресату (рестарт бота на минуту = сотни человек без рассылки).
+      // Исчерпанный rate_limit — такая же недоставка, как сетевая ошибка; blocked остаётся
+      // строкой-следом выше, повторять его бессмысленно.
+      await this.db.delete(schema.messageLog).where(eq(schema.messageLog.id, logId));
+      this.log.warn(`отправка ${input.dedupKey} не удалась (${error}), claim снят — повтор возможен`);
 
-      return { outcome: res.reason === "blocked" ? "blocked" : "error", error };
+      return { outcome: "error", error };
     }
   }
 }

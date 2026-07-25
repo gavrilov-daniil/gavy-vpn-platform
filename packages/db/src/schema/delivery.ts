@@ -22,6 +22,9 @@ export const profile = pgTable("profile", {
   remark: text("remark").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
   isAuto: boolean("is_auto").notNull().default(false),
+  // false — профили «Россия»/«Белые списки»: РФ-ресурсы идут ЧЕРЕЗ туннель,
+  // правило «РФ-домены → freedom» для них не добавляется
+  ruSplit: boolean("ru_split").notNull().default(true),
 });
 
 // Канал: direct = outbound как есть; cascade = клон exit-outbound с dialerProxy=front, оба плеча flow=vision.

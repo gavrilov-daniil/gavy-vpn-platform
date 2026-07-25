@@ -64,7 +64,7 @@ export class PaymentsController {
   }
 
   /** Способы оплаты, доступные пользователю прямо сейчас. */
-  @Get("v1/payments/methods/:purpose")
+  @Get("internal/payments/methods/:purpose")
   async methods(@Param("purpose") purpose: string) {
     const rows = await this.merchants.listAvailable(purpose as "topup" | "plan" | "gift");
     return rows.map((m) => ({
@@ -79,7 +79,7 @@ export class PaymentsController {
    * Создание счёта. Идемпотентно по заголовку x-client-request-id:
    * дабл-тап по кнопке оплаты в боте не должен создавать два счёта у провайдера.
    */
-  @Post("v1/payments/create")
+  @Post("internal/payments/create")
   async create(
     @Body()
     body: {

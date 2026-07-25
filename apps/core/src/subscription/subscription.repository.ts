@@ -141,6 +141,7 @@ export class SubscriptionRepository {
       profiles.push({
         remark: p.remark,
         isAuto: p.isAuto,
+        ruSplit: p.ruSplit,
         primary: primary.length > 0 ? primary : fallback,
         fallback: primary.length > 0 ? fallback : [],
       });

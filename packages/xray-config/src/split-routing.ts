@@ -29,8 +29,11 @@ export interface SplitRoutingParts {
  *   2. приватные CIDR → freedom
  *   3. РФ: зоны + сервисные домены (+ РФ IP-CIDR) → freedom
  * catch-all (→ балансер) и loopback-реинжект добавляет билдер профиля.
+ *
+ * ruSplit=false — обратный сценарий («Россия», «Белые списки»): РФ-ресурсы идут
+ * ЧЕРЕЗ туннель, поэтому шаг 3 не добавляется вовсе.
  */
-export function buildSplitRoutingHead(list: DomainList): SplitRoutingParts {
+export function buildSplitRoutingHead(list: DomainList, ruSplit = true): SplitRoutingParts {
   const head: Array<Record<string, unknown>> = [];
 
   // 1. block QUIC + bittorrent (первым — дешёвый барьер)
@@ -39,6 +42,8 @@ export function buildSplitRoutingHead(list: DomainList): SplitRoutingParts {
 
   // 2. приватные сети → freedom (напрямую, не в туннель)
   head.push({ type: "field", ip: PRIVATE_CIDRS, outboundTag: "freedom" });
+
+  if (!ruSplit) return { head };
 
   // 3. РФ-зоны и домены → freedom
   const domains = [
@@ -55,14 +60,14 @@ export function buildSplitRoutingHead(list: DomainList): SplitRoutingParts {
   return { head };
 }
 
-/** Split-DNS: РФ DoH для РФ-доменов, зарубежный DoH catch-all, UseIPv4 (иначе AAAA-утечки). */
-export function buildDns(list: DomainList): Record<string, unknown> {
+/**
+ * Split-DNS: РФ DoH для РФ-доменов, зарубежный DoH catch-all, UseIPv4 (иначе AAAA-утечки).
+ * ruSplit=false — РФ-резолвер не подключаем: он вернул бы РФ-адреса, а трафик идёт в туннель.
+ */
+export function buildDns(list: DomainList, ruSplit = true): Record<string, unknown> {
   const ruDomains = [...list.zones.map((z) => `domain:${z}`), ...list.domains];
-  return {
-    servers: [
-      { address: RU_DOH, domains: ruDomains },
-      INTL_DOH,
-    ],
-    queryStrategy: "UseIPv4",
-  };
+  const servers: Array<unknown> = ruSplit
+    ? [{ address: RU_DOH, domains: ruDomains }, INTL_DOH]
+    : [INTL_DOH];
+  return { servers, queryStrategy: "UseIPv4" };
 }

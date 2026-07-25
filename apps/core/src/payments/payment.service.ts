@@ -144,13 +144,48 @@ export class PaymentService {
       return { ok: true, status: parsed.status };
     }
 
+    // Сверка суммы: подписи достаточно для подлинности отправителя, но не для того,
+    // что оплачено именно столько, сколько выставлено. Без этой проверки корректно
+    // подписанный вебхук на 10 ₽ закрывал бы тариф за 500 ₽.
+    const amountCheck = this.checkAmount(payment, parsed.amountKopeks);
+    if (!amountCheck.ok) {
+      this.log.error(
+        `payment ${payment.id}: сумма вебхука ${parsed.amountKopeks} не соответствует счёту ${payment.amountKopeks} — не фулфилим`,
+      );
+      await this.db
+        .update(schema.payment)
+        .set({ status: "processing", meta: { ...payment.meta, amountMismatch: { got: parsed.amountKopeks } } })
+        .where(eq(schema.payment.id, payment.id));
+      return { ok: false, reason: "amount_mismatch" as const };
+    }
+
     return this.markPaidAndFulfill(payment.id, parsed.providerRef, parsed.raw);
   }
 
   /**
-   * Атомарный claim: pending|processing|expired → paid.
-   * Expired включён осознанно — платёж мог истечь по нашему TTL, а деньги реально пришли
-   * (в проде из-за расхождения этого списка между провайдерами терялись оплаты).
+   * Недоплату не засчитываем — это ручной разбор.
+   * Переплату принимаем: деньги пришли, отказать клиенту в доступе было бы хуже
+   * (излишек виден в meta и разбирается вручную).
+   * Провайдер, не присылающий сумму (Stars — там сверка в своём контроллере),
+   * проверку проходит: сверять нечего.
+   */
+  private checkAmount(
+    payment: typeof schema.payment.$inferSelect,
+    got: number | undefined,
+  ): { ok: boolean } {
+    if (got === undefined || got === null) return { ok: true };
+    // допуск в 1 копейку — округления курса на стороне провайдера
+    return { ok: got + 1 >= payment.amountKopeks };
+  }
+
+  /**
+   * Атомарный claim: pending|processing|expired|failed → paid.
+   *
+   * expired — платёж мог истечь по нашему TTL, а деньги реально пришли.
+   * failed — мы сами помечаем платёж failed при ошибке создания счёта и по первому
+   * FAIL-вебхуку; если после этого провайдер всё же подтвердит оплату, деньги уже
+   * у него, и не зачислить их означает забрать деньги без услуги.
+   * Оба перехода логируются как аномалия: это не норма, а спасение оплаты.
    */
   private async markPaidAndFulfill(paymentId: string, providerRef: string | undefined, raw: unknown) {
     const result = await this.fulfillInTransaction(paymentId, providerRef, raw);
@@ -176,12 +211,13 @@ export class PaymentService {
           status: "paid",
           paidAt: new Date(),
           providerRef: providerRef ?? sql`${schema.payment.providerRef}`,
-          meta: { webhook: raw ?? null },
+          // не затираем meta целиком: там лежит сырой ответ создания счёта, нужный для разбора
+          meta: sql`${schema.payment.meta} || ${JSON.stringify({ webhook: raw ?? null })}::jsonb`,
         })
         .where(
           and(
             eq(schema.payment.id, paymentId),
-            inArray(schema.payment.status, ["pending", "processing", "expired"]),
+            inArray(schema.payment.status, ["pending", "processing", "expired", "failed"]),
           ),
         )
         .returning();
@@ -190,6 +226,7 @@ export class PaymentService {
         this.log.warn(`payment ${paymentId}: повторный вебхук, уже обработан`);
         return { ok: true, alreadyProcessed: true } as const;
       }
+
 
       const payment = claimed[0];
       const result = await this.ledger.fulfillPayment(tx, payment);
