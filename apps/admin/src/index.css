@@ -826,7 +826,7 @@ select {
   flex-wrap: wrap;
 }
 
-/* --- Вход по админскому токену --- */
+/* --- Вход в админку --- */
 
 .login-screen {
   min-height: 100vh;
@@ -839,10 +839,43 @@ select {
   width: 340px;
 }
 
-.logout-btn {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
+.login-alt {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Виджет Telegram рисует себя сам в iframe — задаём только высоту, чтобы карточка не прыгала. */
+.tg-login {
+  min-height: 40px;
+}
+
+.login-service {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.login-service summary {
+  cursor: pointer;
+}
+
+.sidebar-user {
+  margin-top: 24px;
+  padding: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.sidebar-user .btn {
+  background: transparent;
+  color: var(--sidebar-fg);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 /* Необратимое действие: перевыпуск подписки рвёт доступ клиенту до получения новой ссылки. */

@@ -8,6 +8,7 @@ import {
   type KbDocument,
 } from "../api";
 import { useResource } from "../useResource";
+import { useCan } from "../session";
 import { formatDateTime } from "../format";
 import Card from "../components/Card";
 import Table, { type Column } from "../components/Table";
@@ -21,6 +22,9 @@ import Loading from "../components/Loading";
 
 /** База знаний: то, на что опирается подсказка ИИ. Без неё подсказки будут пустыми. */
 export default function SupportKbPanel() {
+  // Саппорт читает базу и проверяет поиск, правит её админ: на этих документах
+  // строятся ответы ИИ всем клиентам сразу.
+  const canEdit = useCan("admin");
   const docs = useResource(() => getKbDocuments());
   const [editing, setEditing] = useState<{ doc: KbDocument | null } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -71,11 +75,17 @@ export default function SupportKbPanel() {
     {
       key: "active",
       title: "В поиске",
-      render: (d) => (
-        <Toggle checked={d.isActive} disabled={busyId === d.id} onChange={(next) => toggleActive(d, next)} />
-      ),
+      render: (d) =>
+        canEdit ? (
+          <Toggle checked={d.isActive} disabled={busyId === d.id} onChange={(next) => toggleActive(d, next)} />
+        ) : (
+          <StatusBadge status={d.isActive ? "active" : "inactive"} />
+        ),
     },
-    {
+  ];
+
+  if (canEdit) {
+    columns.push({
       key: "actions",
       title: "",
       align: "right",
@@ -84,8 +94,8 @@ export default function SupportKbPanel() {
           Править
         </button>
       ),
-    },
-  ];
+    });
+  }
 
   return (
     <>
@@ -95,9 +105,11 @@ export default function SupportKbPanel() {
         title="База знаний"
         subtitle="Из этих документов ИИ берёт факты. Выключенный документ не попадает в подсказки, но остаётся виден в старых."
         actions={
-          <button type="button" className="btn btn-primary" onClick={() => setEditing({ doc: null })}>
-            Добавить документ
-          </button>
+          canEdit && (
+            <button type="button" className="btn btn-primary" onClick={() => setEditing({ doc: null })}>
+              Добавить документ
+            </button>
+          )
         }
       >
         {docs.data.length === 0 ? (

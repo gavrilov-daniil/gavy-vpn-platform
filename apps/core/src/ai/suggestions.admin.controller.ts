@@ -1,11 +1,15 @@
 import { Body, Controller, Param, Post } from "@nestjs/common";
+import { MinRole } from "../auth/roles.js";
 import { SuggestionService } from "./suggestion.service.js";
 
 /**
  * Работа оператора с подсказкой. Отправки здесь нет: текст уходит клиенту
  * существующим путём — POST /api/admin/support/conversations/:id/reply
  * с полем suggestionId, который и переводит подсказку в статус sent.
+ *
+ * Раздел саппорта: подсказки — часть ведения переписки.
  */
+@MinRole("support")
 @Controller("api/admin/support")
 export class SuggestionsAdminController {
   constructor(private readonly suggestions: SuggestionService) {}

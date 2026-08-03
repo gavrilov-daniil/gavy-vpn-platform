@@ -1,7 +1,8 @@
 import { Controller, Get, Inject } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
+import { MinRole } from "../auth/roles.js";
 import { loadConfig } from "../config.js";
 
 @Controller("api/admin")
@@ -54,8 +55,12 @@ export class AdminController {
     }));
   }
 
-  /** Подписчики: shortUuid нужен, чтобы связать строку с расходом трафика. */
+  /**
+   * Подписчики: shortUuid нужен, чтобы связать строку с расходом трафика.
+   * Саппорту доступно на чтение — без состояния подписки он не ответит клиенту.
+   */
   @Get("subscribers")
+  @MinRole("support")
   async subscribers() {
     const rows = await this.db
       .select({
@@ -94,16 +99,6 @@ export class AdminController {
       revokedAt: sub.subRevokedAt,
       createdAt: sub.createdAt,
     }));
-  }
-
-  /** Операторы — для назначения диалогов поддержки без ручного ввода uuid. */
-  @Get("operators")
-  async operators() {
-    const rows = await this.db
-      .select({ id: schema.user.id, email: schema.user.email, role: schema.user.role, status: schema.user.status })
-      .from(schema.user)
-      .where(and(eq(schema.user.orgId, this.cfg.defaultOrgId), eq(schema.user.status, "active")));
-    return rows;
   }
 
   /** Сегменты — для выбора аудитории рассылки без ручного ввода uuid. */

@@ -69,6 +69,128 @@ const patch = (body: unknown): RequestInit => ({ ...post(body), method: "PATCH" 
 
 const del = (): RequestInit => ({ method: "DELETE" });
 
+// --- Вход, операторы, роли --------------------------------------------------
+
+export const ADMIN_ROLES = ["support", "admin", "superadmin"] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+export const ROLE_LABELS: Record<AdminRole, string> = {
+  support: "Саппорт",
+  admin: "Админ",
+  superadmin: "Супер-админ",
+};
+
+export const ROLE_HINTS: Record<AdminRole, string> = {
+  support: "Переписка с клиентами и просмотр их подписок",
+  admin: "Всё, кроме платёжных провайдеров",
+  superadmin: "Всё, включая ключи платёжных провайдеров",
+};
+
+/** Копия порога из core: кнопка не должна быть активной ради 400 в ответ. */
+export const MIN_PASSWORD_LENGTH = 10;
+
+export interface Me {
+  operatorId: string | null;
+  email: string | null;
+  displayName: string | null;
+  role: AdminRole;
+  telegramUsername: string | null;
+  hasPassword: boolean;
+  hasTelegram: boolean;
+  /** Вход по переходному ADMIN_TOKEN: учётки за ним нет, свой профиль недоступен. */
+  viaSharedToken: boolean;
+}
+
+export interface Operator {
+  id: string;
+  email: string | null;
+  displayName: string | null;
+  telegramId: number | null;
+  telegramUsername: string | null;
+  role: AdminRole;
+  status: "pending" | "active" | "disabled";
+  hasPassword: boolean;
+  approvedAt: string | null;
+  createdAt: string;
+}
+
+export interface LoginResult {
+  token: string;
+  expiresAt: string;
+  operator: { id: string; email: string | null; role: AdminRole; displayName: string | null };
+}
+
+/** Ответ Telegram Login Widget: набор полей и подпись, проверяет её core. */
+export type TelegramAuthPayload = Record<string, string | number>;
+
+/** Заявка (`pending`) сессии не даёт: доступа нет, пока админ не подтвердит. */
+export type TelegramLoginResult = { status: "pending" } | ({ status: "ok" } & LoginResult);
+
+export interface TelegramLoginConfig {
+  enabled: boolean;
+  botUsername: string;
+}
+
+export interface TelegramSettings {
+  isEnabled: boolean;
+  botUsername: string;
+  /** Сам токен наружу не отдаётся — только признак, что он задан. */
+  hasBotToken: boolean;
+  updatedAt: string | null;
+}
+
+export const loginWithPassword = (email: string, password: string) =>
+  request<LoginResult>("/api/admin/auth/login", post({ email, password }));
+
+export const loginWithTelegram = (payload: TelegramAuthPayload) =>
+  request<TelegramLoginResult>("/api/admin/auth/telegram/login", post(payload));
+
+export const getTelegramLoginConfig = () =>
+  request<TelegramLoginConfig>("/api/admin/auth/telegram/config");
+
+export const getMe = () => request<Me>("/api/admin/auth/me");
+
+export const logout = () => request<{ ok: boolean }>("/api/admin/auth/logout", post());
+
+export const changeOwnPassword = (password: string) =>
+  request<{ ok: boolean }>("/api/admin/auth/password", post({ password }));
+
+export const linkOwnTelegram = (payload: TelegramAuthPayload) =>
+  request<{ telegramId: number; telegramUsername: string | null }>("/api/admin/auth/telegram/link", post(payload));
+
+export const unlinkOwnTelegram = () => request<{ ok: boolean }>("/api/admin/auth/telegram/link", del());
+
+export const getOperators = () => request<Operator[]>("/api/admin/auth/operators");
+
+export const createOperator = (body: {
+  email: string;
+  password: string;
+  role: AdminRole;
+  displayName?: string;
+}) => request<{ id: string; email: string; role: AdminRole }>("/api/admin/auth/operators", post(body));
+
+export const approveOperator = (id: string, role: AdminRole) =>
+  request<{ ok: boolean }>(`/api/admin/auth/operators/${id}/approve`, post({ role }));
+
+/** Роль и доступ меняются одной ручкой: на сервере это одна запись, а не две. */
+export const updateOperator = (id: string, body: { role?: AdminRole; status?: "active" | "disabled" }) =>
+  request<{ ok: boolean }>(`/api/admin/auth/operators/${id}`, patch(body));
+
+export const setOperatorPassword = (id: string, password: string) =>
+  request<{ ok: boolean }>(`/api/admin/auth/operators/${id}/password`, post({ password }));
+
+export const unlinkOperatorTelegram = (id: string) =>
+  request<{ ok: boolean }>(`/api/admin/auth/operators/${id}/telegram`, del());
+
+export const getTelegramSettings = () => request<TelegramSettings>("/api/admin/auth/telegram/settings");
+
+export const updateTelegramSettings = (body: {
+  isEnabled?: boolean;
+  botUsername?: string;
+  /** Не передан — не трогаем; пустая строка — стираем. */
+  botToken?: string;
+}) => request<TelegramSettings>("/api/admin/auth/telegram/settings", patch(body));
+
 // --- Мерчанты ---------------------------------------------------------------
 
 export interface Merchant {

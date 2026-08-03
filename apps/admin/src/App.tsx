@@ -8,50 +8,74 @@ import SalesPage from "./pages/SalesPage";
 import BroadcastsPage from "./pages/BroadcastsPage";
 import PlansPage from "./pages/PlansPage";
 import TrafficPage from "./pages/TrafficPage";
-import TokenGate from "./components/TokenGate";
+import AccessPage from "./pages/AccessPage";
+import ProfilePage from "./pages/ProfilePage";
+import AuthGate from "./components/AuthGate";
+import { roleAtLeast, useSession } from "./session";
+import { ROLE_LABELS, type AdminRole } from "./api";
 
-const NAV = [
-  { to: "/merchants", label: "Мерчанты" },
-  { to: "/infra", label: "Инфраструктура" },
-  { to: "/nodes", label: "Ноды и каскады" },
-  { to: "/subscribers", label: "Подписчики" },
-  { to: "/traffic", label: "Трафик" },
-  { to: "/support", label: "Поддержка" },
-  { to: "/sales", label: "Продажи" },
-  { to: "/broadcasts", label: "Рассылки" },
-  { to: "/plans", label: "Тарифы" },
+/**
+ * Экраны и минимальная роль для каждого. Это только навигация: закрывает раздел
+ * гвард в core, здесь мы лишь не показываем то, что всё равно ответит 403.
+ */
+const NAV: { to: string; label: string; role: AdminRole; element: JSX.Element }[] = [
+  { to: "/support", label: "Поддержка", role: "support", element: <SupportPage /> },
+  { to: "/subscribers", label: "Подписчики", role: "support", element: <SubscribersPage /> },
+  { to: "/merchants", label: "Мерчанты", role: "superadmin", element: <MerchantsPage /> },
+  { to: "/infra", label: "Инфраструктура", role: "admin", element: <InfraPage /> },
+  { to: "/nodes", label: "Ноды и каскады", role: "admin", element: <NodesPage /> },
+  { to: "/traffic", label: "Трафик", role: "admin", element: <TrafficPage /> },
+  { to: "/sales", label: "Продажи", role: "admin", element: <SalesPage /> },
+  { to: "/broadcasts", label: "Рассылки", role: "admin", element: <BroadcastsPage /> },
+  { to: "/plans", label: "Тарифы", role: "admin", element: <PlansPage /> },
+  { to: "/access", label: "Доступ", role: "admin", element: <AccessPage /> },
+  { to: "/profile", label: "Мой профиль", role: "support", element: <ProfilePage /> },
 ];
 
 export default function App() {
   return (
-    <TokenGate>
-      <div className="layout">
-        <aside className="sidebar">
-          <div className="brand">VPN Admin</div>
-          <nav>
-            {NAV.map((item) => (
-              <NavLink key={item.to} to={item.to}>
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        </aside>
-        <main className="content">
-          <Routes>
-            <Route path="/" element={<Navigate to="/merchants" replace />} />
-            <Route path="/merchants" element={<MerchantsPage />} />
-            <Route path="/infra" element={<InfraPage />} />
-            <Route path="/nodes" element={<NodesPage />} />
-            <Route path="/subscribers" element={<SubscribersPage />} />
-            <Route path="/traffic" element={<TrafficPage />} />
-            <Route path="/support" element={<SupportPage />} />
-            <Route path="/sales" element={<SalesPage />} />
-            <Route path="/broadcasts" element={<BroadcastsPage />} />
-            <Route path="/plans" element={<PlansPage />} />
-            <Route path="*" element={<Navigate to="/merchants" replace />} />
-          </Routes>
-        </main>
-      </div>
-    </TokenGate>
+    <AuthGate>
+      <Shell />
+    </AuthGate>
+  );
+}
+
+function Shell() {
+  const { me, signOut } = useSession();
+  // «Мой профиль» открыт самой младшей роли, поэтому список пуст быть не может.
+  const allowed = NAV.filter((item) => roleAtLeast(me.role, item.role));
+  const home = allowed[0].to;
+
+  return (
+    <div className="layout">
+      <aside className="sidebar">
+        <div className="brand">CoreLink</div>
+        <nav>
+          {allowed.map((item) => (
+            <NavLink key={item.to} to={item.to}>
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="sidebar-user">
+          <div className="small">{me.displayName ?? me.email ?? "Оператор"}</div>
+          <div className="muted small">{ROLE_LABELS[me.role]}</div>
+          <button type="button" className="btn btn-sm" onClick={signOut}>
+            Выйти
+          </button>
+        </div>
+      </aside>
+      <main className="content">
+        <Routes>
+          <Route path="/" element={<Navigate to={home} replace />} />
+          {allowed.map((item) => (
+            <Route key={item.to} path={item.to} element={item.element} />
+          ))}
+          {/* Экран не по роли и несуществующий адрес ведут в одно место: своих прав
+              оператор не знает, и «страница есть, но не для вас» ему ничего не даёт. */}
+          <Route path="*" element={<Navigate to={home} replace />} />
+        </Routes>
+      </main>
+    </div>
   );
 }

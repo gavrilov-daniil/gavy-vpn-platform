@@ -1,5 +1,15 @@
-import { pgTable, uuid, text, timestamp, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
-import { createdAt, orgId } from "./_shared.js";
+import {
+  pgTable,
+  uuid,
+  text,
+  timestamp,
+  jsonb,
+  boolean,
+  bigint,
+  uniqueIndex,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
+import { createdAt, orgId, updatedAt } from "./_shared.js";
 
 // Корень tenant'а. Деплой для своей сети = одна строка (org #1).
 export const organization = pgTable("organization", {
@@ -11,16 +21,52 @@ export const organization = pgTable("organization", {
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("organization_slug_uq").on(t.slug)]);
 
-// АДМИН панели (оператор/админ). НЕ путать с subscriber (конечный VPN-юзер).
+/**
+ * АДМИН панели (оператор/админ). НЕ путать с subscriber (конечный VPN-юзер).
+ *
+ * Два способа входа на одну учётку: email+пароль и Telegram. Обязателен ровно один
+ * из них, поэтому оба поля nullable: у заведённой из админки учётки нет telegram_id,
+ * у пришедшей через Telegram — email.
+ *
+ * `status=pending` — самозаписавшийся через Telegram, доступа ещё нет: сессия такой
+ * учётке не выдаётся, пока админ не подтвердит её и не назначит роль.
+ */
 export const user = pgTable("user", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: orgId(),
-  email: text("email").notNull(),
+  email: text("email"),
   passwordHash: text("password_hash"),
-  role: text("role").notNull().default("operator"), // owner | admin | operator
-  status: text("status").notNull().default("active"),
+  telegramId: bigint("telegram_id", { mode: "number" }),
+  telegramUsername: text("telegram_username"),
+  displayName: text("display_name"),
+  role: text("role").notNull().default("support"), // superadmin | admin | support
+  status: text("status").notNull().default("pending"), // pending | active | disabled
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  approvedByUserId: uuid("approved_by_user_id").references((): AnyPgColumn => user.id),
   createdAt: createdAt(),
-}, (t) => [uniqueIndex("user_org_email_uq").on(t.orgId, t.email)]);
+}, (t) => [
+  uniqueIndex("user_org_email_uq").on(t.orgId, t.email),
+  // Один telegram — одна учётка. NULL'ы Postgres считает различными, поэтому индекс
+  // не мешает учёткам без привязки.
+  uniqueIndex("user_org_telegram_uq").on(t.orgId, t.telegramId),
+]);
+
+/**
+ * Настройки входа по Telegram (Login Widget). Одна строка на org, правится из админки.
+ *
+ * Токен бота — секрет: лежит зашифрованным тем же AES-256-GCM, что и креды мерчантов,
+ * наружу отдаётся только признак «задан». Он же ключ проверки подписи виджета,
+ * поэтому его утечка = возможность подделать вход любого оператора.
+ */
+export const telegramAuthSetting = pgTable("telegram_auth_setting", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  isEnabled: boolean("is_enabled").notNull().default(false),
+  botUsername: text("bot_username").notNull().default(""),
+  botToken: text("bot_token").notNull().default(""),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [uniqueIndex("telegram_auth_setting_org_uq").on(t.orgId)]);
 
 export const apiToken = pgTable("api_token", {
   id: uuid("id").primaryKey().defaultRandom(),

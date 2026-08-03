@@ -9,10 +9,12 @@ import {
   patchConversation,
   rejectSuggestion,
   replyToConversation,
+  type AdminRole,
   type AiSuggestion,
   type ConversationListItem,
 } from "../api";
 import { useResource } from "../useResource";
+import { roleAtLeast, useSession } from "../session";
 import { formatAgo, formatDateTime } from "../format";
 import StatusBadge from "../components/StatusBadge";
 import EmptyState from "../components/EmptyState";
@@ -25,22 +27,25 @@ import SupportAiPanel from "./SupportAiPanel";
 const POLL_MS = 10_000;
 
 const TABS = [
-  { key: "dialogs", label: "Диалоги" },
-  { key: "kb", label: "База знаний" },
-  { key: "ai", label: "Провайдер ИИ" },
-] as const;
+  { key: "dialogs", label: "Диалоги", role: "support" },
+  { key: "kb", label: "База знаний", role: "support" },
+  // Ключ провайдера ИИ — секрет, его правит админ; саппорту вкладка не показывается.
+  { key: "ai", label: "Провайдер ИИ", role: "admin" },
+] as const satisfies readonly { key: string; label: string; role: AdminRole }[];
 
 type Tab = (typeof TABS)[number]["key"];
 
 export default function SupportPage() {
   const [tab, setTab] = useState<Tab>("dialogs");
+  const { me } = useSession();
+  const tabs = TABS.filter((t) => roleAtLeast(me.role, t.role));
 
   return (
     <>
       <div className="page-head">
         <h1>Поддержка</h1>
         <div className="head-tools">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.key}
               type="button"

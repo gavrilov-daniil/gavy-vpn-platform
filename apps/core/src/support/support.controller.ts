@@ -1,4 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Operator } from "../auth/operator.decorator.js";
+import { MinRole, type OperatorContext } from "../auth/roles.js";
 import { BotClient } from "../bot/bot.client.js";
 import { SuggestionService } from "../ai/suggestion.service.js";
 import { CONVERSATION_STATUSES, SupportService, type ConversationStatus } from "./support.service.js";
@@ -31,11 +33,13 @@ export class SupportController {
   }
 
   @Get("api/admin/support/conversations")
+  @MinRole("support")
   list(@Query("status") status?: string, @Query("limit") limit?: string) {
     return this.support.listConversations({ status, limit: limit ? Number(limit) : undefined });
   }
 
   @Get("api/admin/support/conversations/:id")
+  @MinRole("support")
   get(@Param("id") id: string) {
     return this.support.getConversation(id);
   }
@@ -47,15 +51,19 @@ export class SupportController {
    * иначе «отправлено» стояло бы у текста, которого клиент не видел.
    */
   @Post("api/admin/support/conversations/:id/reply")
+  @MinRole("support")
   async reply(
     @Param("id") id: string,
-    @Body() body: { text: string; operatorUserId?: string; suggestionId?: string },
+    @Body() body: { text: string; suggestionId?: string },
+    @Operator() operator: OperatorContext,
   ) {
     if (!body.text?.trim()) throw new BadRequestException("пустой текст ответа");
 
     const message = await this.support.replyFromOperator({
       conversationId: id,
-      operatorUserId: body.operatorUserId,
+      // Автор — только из сессии: клиент не должен уметь подписать ответ чужим именем.
+      // У входа по общему токену учётки нет, там автор остаётся пустым.
+      operatorUserId: operator.operatorId ?? undefined,
       text: body.text,
     });
     if (message.deduped) return { messageId: message.messageId, deduped: true, delivered: false };
@@ -72,6 +80,7 @@ export class SupportController {
   }
 
   @Patch("api/admin/support/conversations/:id")
+  @MinRole("support")
   async patch(@Param("id") id: string, @Body() body: { status?: string; assigneeUserId?: string | null }) {
     if (body.status !== undefined && !CONVERSATION_STATUSES.includes(body.status as ConversationStatus)) {
       throw new BadRequestException(`статус должен быть одним из: ${CONVERSATION_STATUSES.join(", ")}`);

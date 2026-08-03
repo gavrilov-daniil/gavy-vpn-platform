@@ -9,7 +9,7 @@
  * Имя файла *.test.ts намеренное: тестовое окружение не должно попадать в сборку,
  * а tsconfig.build.json исключает ровно этот паттерн. Тестов здесь нет — только хелперы.
  */
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { createDb, schema, type Database } from "@corelink/db";
 import { encryptCredentials } from "@corelink/core-kit";
@@ -175,6 +175,23 @@ export function paritypayWebhook(input: {
     rawBody: JSON.stringify(payload),
     headers: { "x-signature": input.breakSignature ? "deadbeef".repeat(8) : signature },
   };
+}
+
+/**
+ * Подписанная полезная нагрузка Telegram Login Widget. Формула считается здесь
+ * независимо от кода проверки — по той же причине, что и подпись ParityPay выше.
+ */
+export function telegramWidgetPayload(
+  fields: Record<string, string | number>,
+  botToken: string,
+): Record<string, string | number> {
+  const checkString = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .sort()
+    .join("\n");
+  const secret = createHash("sha256").update(botToken).digest();
+  return { ...fields, hash: createHmac("sha256", secret).update(checkString).digest("hex") };
 }
 
 export interface ChannelSpec {
@@ -388,6 +405,10 @@ export async function cleanupOrg(db: Database): Promise<void> {
     sql`delete from node where org_id = ${org}`,
     sql`delete from config_profile where org_id = ${org}`,
     sql`delete from server where org_id = ${org}`,
+    // сессии до учёток: operator_session ссылается на user
+    sql`delete from operator_session where org_id = ${org}`,
+    sql`delete from "user" where org_id = ${org}`,
+    sql`delete from telegram_auth_setting where org_id = ${org}`,
   ];
   for (const statement of statements) await db.execute(statement);
 }

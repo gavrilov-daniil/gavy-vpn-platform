@@ -1,8 +1,16 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { PROVIDER_SPECS } from "@corelink/payments";
+import { MinRole } from "../auth/roles.js";
 import { MerchantService } from "./merchant.service.js";
 
-/** Управление мерчантами из админки: подключить, настроить ключи, включить, проверить. */
+/**
+ * Управление мерчантами из админки: подключить, настроить ключи, включить, проверить.
+ *
+ * Единственный раздел под superadmin: здесь лежат ключи, которыми принимаются деньги,
+ * и подменивший их получает выручку себе. Список провайдеров закрыт вместе с остальным —
+ * он подсказывает, какие ключи вообще есть смысл искать.
+ */
+@MinRole("superadmin")
 @Controller("api/admin/merchants")
 export class MerchantsAdminController {
   constructor(private readonly merchants: MerchantService) {}

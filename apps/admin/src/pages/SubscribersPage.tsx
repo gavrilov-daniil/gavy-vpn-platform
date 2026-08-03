@@ -11,6 +11,7 @@ import {
   type UsageRow,
 } from "../api";
 import { useResource } from "../useResource";
+import { useCan } from "../session";
 import { daysLeft, formatBytes, formatDateTime } from "../format";
 import Card from "../components/Card";
 import Table, { type Column } from "../components/Table";
@@ -226,6 +227,9 @@ function SubscriberDetails({ subscriber, onClose }: { subscriber: Subscriber; on
 
 /** Устройства подписки: занятые слоты и отвязка застрявшего устройства. */
 function DevicesBlock({ subscriptionId, deviceLimit }: { subscriptionId: string; deviceLimit: number | null }) {
+  // Саппорт видит устройства, но не отвязывает: core отвечает на это 403, и кнопка,
+  // которая всегда падает, хуже её отсутствия.
+  const canEdit = useCan("admin");
   const [devices, setDevices] = useState<SubscriberDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -262,7 +266,10 @@ function DevicesBlock({ subscriptionId, deviceLimit }: { subscriptionId: string;
     { key: "os", title: "Платформа", render: (d) => d.deviceOs ?? "—" },
     { key: "model", title: "Модель", render: (d) => d.deviceModel ?? "—" },
     { key: "last", title: "Последний раз", render: (d) => formatDateTime(d.lastSeenAt) },
-    {
+  ];
+
+  if (canEdit) {
+    columns.push({
       key: "act",
       title: "",
       align: "right",
@@ -271,8 +278,8 @@ function DevicesBlock({ subscriptionId, deviceLimit }: { subscriptionId: string;
           {busy === d.hwid ? "…" : "Отвязать"}
         </button>
       ),
-    },
-  ];
+    });
+  }
 
   return (
     <>
@@ -296,6 +303,7 @@ function DevicesBlock({ subscriptionId, deviceLimit }: { subscriptionId: string;
  * до тех пор, пока клиент не заберёт новую ссылку в боте, поэтому с подтверждением.
  */
 function RevokeBlock({ subscriptionId }: { subscriptionId: string }) {
+  const canRevoke = useCan("admin");
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -314,6 +322,8 @@ function RevokeBlock({ subscriptionId }: { subscriptionId: string }) {
       setBusy(false);
     }
   };
+
+  if (!canRevoke) return null;
 
   return (
     <>

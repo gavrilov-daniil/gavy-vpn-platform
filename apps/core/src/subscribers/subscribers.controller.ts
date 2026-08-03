@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
+import { MinRole } from "../auth/roles.js";
 import { SubscribersService } from "./subscribers.service.js";
 
 @Controller()
@@ -37,7 +38,9 @@ export class SubscribersController {
 
   // --- подписки из админки ---
 
+  /** Саппорту доступно на чтение: «сколько у меня устройств» — типовой вопрос в поддержку. */
   @Get("api/admin/subscriptions/:id/devices")
+  @MinRole("support")
   devices(@Param("id") id: string) {
     return this.subscribers.listDevices(id);
   }

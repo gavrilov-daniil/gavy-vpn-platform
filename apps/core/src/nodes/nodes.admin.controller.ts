@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { MinRole } from "../auth/roles.js";
 import { NodeStateService } from "./node-state.service.js";
 import { CascadeService } from "./cascade.service.js";
 import { StatsService } from "./stats.service.js";
@@ -68,13 +69,16 @@ export class NodesAdminController {
     return this.cascades.attachChannel(id, body.channelId);
   }
 
+  /** Расход одной подписки. Саппорту доступен: сводка по всей сети (stats/*) — нет. */
   @Get("usage/:shortUuid")
+  @MinRole("support")
   usage(@Param("shortUuid") shortUuid: string) {
     return this.stats.usageBySubscription(shortUuid);
   }
 
   /** Устройства подписки: что подключалось и когда. Байт по устройству нет — см. StatsService. */
   @Get("usage/:shortUuid/devices")
+  @MinRole("support")
   devices(@Param("shortUuid") shortUuid: string) {
     return this.stats.devicesBySubscription(shortUuid);
   }

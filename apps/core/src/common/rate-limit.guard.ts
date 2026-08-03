@@ -9,6 +9,8 @@ import { INTERNAL_PATH_PREFIX } from "./service-token.guard.js";
 
 export const WEBHOOK_PATH_PREFIX = "/webhooks";
 export const ADMIN_LOGIN_PATH = "/api/admin/auth/login";
+/** Вход по Telegram — та же неаутентифицированная точка и тот же лимит, что у пароля. */
+export const ADMIN_TELEGRAM_LOGIN_PATH = "/api/admin/auth/telegram/login";
 
 interface Check {
   key: string;
@@ -65,9 +67,10 @@ export class RateLimitGuard implements CanActivate {
   }
 
   private checksFor(req: Request, path: string, ip: string): Check[] {
-    if (path === ADMIN_LOGIN_PATH) {
+    if (path === ADMIN_LOGIN_PATH || path === ADMIN_TELEGRAM_LOGIN_PATH) {
       // Два ключа сразу: по IP — против перебора пароля одной учётки, по email —
       // против того же перебора, размазанного по ботнету и сменившего IP.
+      // У входа по Telegram email в теле нет, поэтому второй ключ не добавится сам.
       const checks: Check[] = [
         { key: `admin-login:ip:${ip}`, rule: this.cfg.adminLoginRateLimitPerIp, subject: `входа с ip ${ip}` },
       ];
