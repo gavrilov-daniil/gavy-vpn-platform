@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { request, safeCompare } from "@vpn/core-kit";
+import { request, safeCompare } from "@corelink/core-kit";
 import { resolveProviderBaseUrl } from "../provider-urls.js";
 import {
   kopeksToRubles,

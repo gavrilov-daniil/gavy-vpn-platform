@@ -16,7 +16,7 @@ export function errorMessage(e: unknown): string {
 
 const TOKEN_STORAGE_KEY = "vpn-admin-token";
 
-/** Токен админского API (заголовок x-admin-token). Значение ADMIN_TOKEN из env core. */
+/** Токен админского API (заголовок x-admin-token): сессия оператора или переходный ADMIN_TOKEN. */
 export function getAdminToken(): string {
   return localStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
 }
@@ -66,6 +66,8 @@ const post = (body?: unknown): RequestInit =>
     : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 
 const patch = (body: unknown): RequestInit => ({ ...post(body), method: "PATCH" });
+
+const del = (): RequestInit => ({ method: "DELETE" });
 
 // --- Мерчанты ---------------------------------------------------------------
 
@@ -132,13 +134,65 @@ export const checkMerchant = (id: string) =>
 
 // --- Ноды и каскады ---------------------------------------------------------
 
+export const NODE_ROLES = ["exit", "relay", "front"] as const;
+export const NODE_STATUSES = ["provisioning", "active", "disabled", "retiring"] as const;
+
 export interface Node {
   id: string;
   name: string;
   roles: string[];
   status: string;
+  serverId: string;
+  serverHostname: string | null;
+  configProfileId: string;
+  consumptionMultiplier: number;
+  trackTraffic: boolean;
+  sortOrder: number;
+  address: string | null;
+  country: string | null;
   lastHeartbeatAt: string | null;
+  agentVersion: string | null;
+  xrayVersion: string | null;
+  desiredVersion: number | null;
+  desiredConfigHash: string | null;
+  appliedConfigHash: string | null;
+  /** desired-хеш совпал с применённым агентом — только это значит «конфиг доехал». */
+  converged: boolean;
 }
+
+/** Что пересобралось после правки: без этого не видно, доехало ли изменение до нод. */
+export interface RebuildInfo {
+  nodeId: string;
+  name: string;
+  version: number;
+  changed: boolean;
+}
+
+export interface NodeInput {
+  serverId: string;
+  configProfileId: string;
+  name: string;
+  roles: string[];
+  status?: string;
+  consumptionMultiplier?: number;
+  trackTraffic?: boolean;
+  sortOrder?: number;
+}
+
+export const createNode = (body: NodeInput) =>
+  request<Node & { rebuilt: RebuildInfo[] }>("/api/admin/nodes", post(body));
+
+export const updateNode = (id: string, body: Partial<NodeInput>) =>
+  request<Node & { rebuilt: RebuildInfo[] }>(`/api/admin/nodes/${id}`, patch(body));
+
+export const deleteNode = (id: string) => request<{ ok: boolean }>(`/api/admin/nodes/${id}`, del());
+
+/** Значение показывается ЕДИНСТВЕННЫЙ раз: в БД лежит только его хеш. */
+export const issueEnrollment = (id: string) =>
+  request<{ nodeId: string; nodeName: string; bootstrapToken: string; bootstrapExpiresAt: string | null }>(
+    `/api/admin/nodes/${id}/enrollment`,
+    post(),
+  );
 
 export interface DesiredState {
   nodeId: string;
@@ -185,6 +239,190 @@ export const createCascade = (body: {
 
 export const refreshCascade = (id: string) =>
   request<Cascade | null>(`/api/admin/cascades/${id}/refresh`, post());
+
+// --- Инфраструктура: серверы, профили, inbound'ы, host'ы, squad'ы ------------
+
+export const FINGERPRINTS = [
+  "chrome",
+  "firefox",
+  "safari",
+  "ios",
+  "android",
+  "edge",
+  "360",
+  "qq",
+  "random",
+  "randomized",
+] as const;
+export const INBOUND_NETWORKS = ["tcp", "grpc", "xhttp", "ws"] as const;
+export const INBOUND_FLOWS = ["xtls-rprx-vision", ""] as const;
+
+export interface Server {
+  id: string;
+  hostname: string;
+  primaryIp: string;
+  extraIps: string[];
+  country: string | null;
+  capabilities: Record<string, unknown>;
+  agentStatus: string;
+  agentVersion: string | null;
+  xrayVersion: string | null;
+  lastHeartbeatAt: string | null;
+  createdAt: string;
+  /** ssh_ref — указатель в vault; наружу отдаётся только признак, что он задан. */
+  hasSshRef: boolean;
+  nodeCount: number;
+}
+
+export interface ConfigProfile {
+  id: string;
+  name: string;
+  baseJson: Record<string, unknown>;
+  createdAt: string;
+  nodeId: string | null;
+  nodeName: string | null;
+  inboundCount: number;
+}
+
+export interface Inbound {
+  id: string;
+  configProfileId: string;
+  tag: string;
+  protocol: string;
+  network: string;
+  security: string;
+  port: number;
+  flow: string;
+  sni: string | null;
+  fingerprint: string | null;
+  realityPublicKey: string | null;
+  shortIds: string[];
+  params: Record<string, unknown>;
+  hasRealityPrivkeyRef: boolean;
+  nodeId: string | null;
+  nodeName: string | null;
+}
+
+export interface Host {
+  id: string;
+  inboundId: string;
+  nodeId: string;
+  remark: string;
+  address: string;
+  port: number;
+  sni: string | null;
+  fingerprint: string | null;
+  alpn: string | null;
+  pbk: string | null;
+  sid: string | null;
+  flow: string | null;
+  tagPrefix: string | null;
+  isHidden: boolean;
+  isDisabled: boolean;
+  sortOrder: number;
+  inboundTag: string | null;
+  nodeName: string | null;
+  channelCount: number;
+}
+
+export interface Squad {
+  id: string;
+  name: string;
+  inbounds: { id: string; tag: string }[];
+  subscriptionCount: number;
+}
+
+type WithRebuild<T> = T & { rebuilt: RebuildInfo[] };
+
+export const getServers = () => request<Server[]>("/api/admin/servers");
+
+export const createServer = (body: {
+  hostname: string;
+  primaryIp: string;
+  extraIps?: string[];
+  country?: string | null;
+  sshRef?: string | null;
+  capabilities?: Record<string, unknown>;
+}) => request<Server>("/api/admin/servers", post(body));
+
+export const updateServer = (id: string, body: Partial<Parameters<typeof createServer>[0]>) =>
+  request<Server>(`/api/admin/servers/${id}`, patch(body));
+
+export const deleteServer = (id: string) => request<{ ok: boolean }>(`/api/admin/servers/${id}`, del());
+
+export const getConfigProfiles = () => request<ConfigProfile[]>("/api/admin/config-profiles");
+
+export const createConfigProfile = (body: { name: string; baseJson?: Record<string, unknown> }) =>
+  request<ConfigProfile>("/api/admin/config-profiles", post(body));
+
+export const updateConfigProfile = (id: string, body: { name?: string; baseJson?: Record<string, unknown> }) =>
+  request<WithRebuild<ConfigProfile>>(`/api/admin/config-profiles/${id}`, patch(body));
+
+export const deleteConfigProfile = (id: string) =>
+  request<{ ok: boolean }>(`/api/admin/config-profiles/${id}`, del());
+
+export interface InboundInput {
+  configProfileId: string;
+  tag: string;
+  port: number;
+  network?: string;
+  flow?: string;
+  sni?: string | null;
+  fingerprint?: string;
+  shortIds?: string[];
+  realityPrivkeyRef?: string | null;
+}
+
+export const getInbounds = () => request<Inbound[]>("/api/admin/inbounds");
+
+export const createInbound = (body: InboundInput) =>
+  request<WithRebuild<Inbound>>("/api/admin/inbounds", post(body));
+
+export const updateInbound = (id: string, body: Partial<Omit<InboundInput, "configProfileId">>) =>
+  request<WithRebuild<Inbound>>(`/api/admin/inbounds/${id}`, patch(body));
+
+export const deleteInbound = (id: string) =>
+  request<{ ok: boolean; rebuilt: RebuildInfo[] }>(`/api/admin/inbounds/${id}`, del());
+
+export interface HostInput {
+  inboundId: string;
+  nodeId: string;
+  remark: string;
+  address: string;
+  port: number;
+  sni?: string | null;
+  fingerprint?: string;
+  alpn?: string | null;
+  pbk?: string | null;
+  sid?: string | null;
+  flow?: string;
+  tagPrefix?: string | null;
+  isHidden?: boolean;
+  isDisabled?: boolean;
+  sortOrder?: number;
+}
+
+export const getHosts = () => request<Host[]>("/api/admin/hosts");
+
+export const createHost = (body: HostInput) => request<WithRebuild<Host>>("/api/admin/hosts", post(body));
+
+export const updateHost = (id: string, body: Partial<HostInput>) =>
+  request<WithRebuild<Host>>(`/api/admin/hosts/${id}`, patch(body));
+
+export const deleteHost = (id: string) =>
+  request<{ ok: boolean; rebuilt: RebuildInfo[] }>(`/api/admin/hosts/${id}`, del());
+
+export const getSquads = () => request<Squad[]>("/api/admin/squads");
+
+export const createSquad = (body: { name: string; inboundIds?: string[] }) =>
+  request<WithRebuild<Squad>>("/api/admin/squads", post(body));
+
+/** inboundIds — полная замена состава, а не добавление. */
+export const updateSquad = (id: string, body: { name?: string; inboundIds?: string[] }) =>
+  request<WithRebuild<Squad>>(`/api/admin/squads/${id}`, patch(body));
+
+export const deleteSquad = (id: string) =>
+  request<{ ok: boolean; rebuilt: RebuildInfo[] }>(`/api/admin/squads/${id}`, del());
 
 // --- Подписчики -------------------------------------------------------------
 
@@ -270,6 +508,19 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
+export const SUGGESTION_STATUSES = ["proposed", "accepted", "edited", "rejected", "sent"] as const;
+
+export interface AiSuggestion {
+  id: string;
+  messageId: string | null;
+  model: string | null;
+  content: string;
+  status: string;
+  createdAt: string;
+  /** На чём основана подсказка: оператор должен видеть источник. */
+  documents: { id: string; title: string }[];
+}
+
 export interface Conversation {
   id: string;
   status: string;
@@ -289,6 +540,7 @@ export interface Conversation {
     subscriberId: string | null;
   } | null;
   messages: ConversationMessage[];
+  suggestions: AiSuggestion[];
 }
 
 export const getConversations = (status?: string) =>
@@ -299,14 +551,107 @@ export const getConversations = (status?: string) =>
 export const getConversation = (id: string) =>
   request<Conversation>(`/api/admin/support/conversations/${id}`);
 
-export const replyToConversation = (id: string, text: string) =>
+/** `suggestionId` — след того, что текст взят из подсказки; статус sent ставится после доставки. */
+export const replyToConversation = (id: string, text: string, suggestionId?: string) =>
   request<{ messageId: string; deduped: boolean; delivered: boolean; reason?: string }>(
     `/api/admin/support/conversations/${id}/reply`,
-    post({ text }),
+    post(suggestionId ? { text, suggestionId } : { text }),
   );
 
 export const patchConversation = (id: string, body: { status?: string; assigneeUserId?: string | null }) =>
   request<Conversation | null>(`/api/admin/support/conversations/${id}`, patch(body));
+
+// --- Подсказки ИИ, база знаний, провайдер --------------------------------------
+
+export interface SuggestionOutcome {
+  status: "created" | "exists" | "skipped" | "failed";
+  suggestionId?: string;
+  reason?: string;
+}
+
+export const generateSuggestion = (conversationId: string) =>
+  request<SuggestionOutcome>(`/api/admin/support/conversations/${conversationId}/suggest`, post());
+
+/** Текст передаётся, только когда оператор его правил — тогда статус edited. */
+export const acceptSuggestion = (id: string, text?: string) =>
+  request<AiSuggestion>(`/api/admin/support/suggestions/${id}/accept`, post(text ? { text } : {}));
+
+export const rejectSuggestion = (id: string) =>
+  request<AiSuggestion>(`/api/admin/support/suggestions/${id}/reject`, post());
+
+export interface KbDocument {
+  id: string;
+  title: string;
+  body: string;
+  source: string | null;
+  lang: string;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export const getKbDocuments = () => request<KbDocument[]>("/api/admin/support/kb");
+
+export const searchKbDocuments = (q: string) =>
+  request<{ id: string; title: string; body: string }[]>(
+    `/api/admin/support/kb/search?q=${encodeURIComponent(q)}`,
+  );
+
+export const createKbDocument = (body: { title: string; body: string; source?: string }) =>
+  request<KbDocument>("/api/admin/support/kb", post(body));
+
+export const updateKbDocument = (
+  id: string,
+  body: { title?: string; body?: string; source?: string | null; isActive?: boolean },
+) => request<KbDocument>(`/api/admin/support/kb/${id}`, patch(body));
+
+export interface AiProvider {
+  id: string;
+  provider: string;
+  alias: string;
+  isEnabled: boolean;
+  model: string;
+  /** С бэкенда приходят маскированными, значим только набор ключей. */
+  credentials: Record<string, string>;
+  settings: Record<string, unknown>;
+  lastCheckAt: string | null;
+  lastCheckOk: boolean | null;
+  lastCheckError: string | null;
+  isConfigured: boolean;
+}
+
+export interface AiProviderSpec {
+  provider: string;
+  title: string;
+  defaultModel: string;
+  credentialFields: { key: string; label: string; required: boolean }[];
+  settingFields: { key: string; label: string; type: "number" | "string"; default?: string | number }[];
+}
+
+export const getAiProviders = () => request<AiProvider[]>("/api/admin/ai/providers");
+
+export const getAiProviderSpecs = () => request<AiProviderSpec[]>("/api/admin/ai/providers/specs");
+
+export const createAiProvider = (body: {
+  provider: string;
+  alias: string;
+  model?: string;
+  credentials?: Record<string, string>;
+  settings?: Record<string, unknown>;
+}) => request<AiProvider>("/api/admin/ai/providers", post(body));
+
+export const updateAiProvider = (
+  id: string,
+  body: {
+    alias?: string;
+    model?: string;
+    isEnabled?: boolean;
+    credentials?: Record<string, string>;
+    settings?: Record<string, unknown>;
+  },
+) => request<AiProvider>(`/api/admin/ai/providers/${id}`, patch(body));
+
+export const checkAiProvider = (id: string) =>
+  request<{ ok: boolean; detail?: string }>(`/api/admin/ai/providers/${id}/check`, post());
 
 // --- Продажи: воронка и кампании --------------------------------------------
 
@@ -381,6 +726,53 @@ export const createCampaignLink = (id: string, label?: string) =>
 export const getCampaignStats = (id: string) => request<CampaignStats>(`/api/admin/campaigns/${id}/stats`);
 
 export const getFunnel = (days: number) => request<Funnel>(`/api/admin/funnel?days=${days}`);
+
+// --- Статистика трафика ------------------------------------------------------
+// Суммы приходят из Postgres как bigint, а он сериализуется строкой: числом их
+// объявлять нельзя, JSON.parse отдаст именно строку.
+
+export interface TrafficOverview {
+  periodDays: number;
+  traffic: {
+    up: string;
+    down: string;
+    subscribers: number;
+    byDay: { day: string; up: string; down: string }[];
+    byNode: { nodeId: string; nodeName: string; country: string | null; up: string; down: string }[];
+  };
+  /** Байтов по устройству здесь нет и не будет: Xray считает трафик по email подписки. */
+  devices: {
+    total: number;
+    byPlatform: { os: string | null; devices: number; subscriptions: number }[];
+  };
+}
+
+export interface TopSubscriber {
+  shortUuid: string;
+  subscriptionId: string | null;
+  status: string | null;
+  telegramId: number | null;
+  up: string;
+  down: string;
+}
+
+export interface SubscriptionDevice {
+  hwid: string;
+  deviceOs: string | null;
+  osVer: string | null;
+  deviceModel: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export const getTrafficOverview = (days: number) =>
+  request<TrafficOverview>(`/api/admin/stats/overview?days=${days}`);
+
+export const getTopSubscribers = (days: number, limit = 25) =>
+  request<TopSubscriber[]>(`/api/admin/stats/top-subscribers?days=${days}&limit=${limit}`);
+
+export const getSubscriptionDevices = (shortUuid: string) =>
+  request<SubscriptionDevice[]>(`/api/admin/usage/${encodeURIComponent(shortUuid)}/devices`);
 
 // --- Рассылки и триггерные касания ------------------------------------------
 

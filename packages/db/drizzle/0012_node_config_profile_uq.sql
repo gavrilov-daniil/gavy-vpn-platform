@@ -1,0 +1,12 @@
+-- Инвариант «1 config_profile = 1 нода» — индексом, а не комментарием в схеме.
+--
+-- Reality-идентичность ноды лежит на inbound'е (inbound.reality_public_key / short_ids),
+-- а inbound принадлежит профилю. Энроллмент второй ноды с тем же config_profile_id
+-- перетирал ключи первой (node-identity.service.applyRealityIdentity обновляет ВСЕ
+-- reality-инбаунды профиля). Клиентская выдача это переживала — она берёт pbk из host,
+-- привязанного к node_id, — а каскадное плечо relay→exit читает Reality из inbound
+-- и начинало указывать на чужой ключ: канал жив по статусу, мёртв по хендшейку.
+--
+-- Отдельная таблица node_inbound здесь была бы преждевременной абстракцией: связь
+-- в парке фактически 1:1. Индекс стоит дешевле и ловит нарушение в момент записи.
+CREATE UNIQUE INDEX IF NOT EXISTS node_config_profile_uq ON "node" ("config_profile_id");

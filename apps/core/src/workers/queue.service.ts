@@ -80,6 +80,30 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Немедленная постановка джобы в обход расписания — когда ждать следующего тика
+   * дорого (подсказка оператору нужна к моменту, когда он открыл диалог).
+   *
+   * jobId с временным окном схлопывает пачку событий в один прогон: десять сообщений
+   * за десять секунд не должны давать десять одинаковых сборок.
+   *
+   * Не бросает: постановка в очередь — оптимизация поверх cron-страховки, и падение
+   * Redis не имеет права ронять вызывающий бизнес-путь.
+   */
+  async enqueue(name: JobName, dedupWindowSec = 10): Promise<boolean> {
+    if (!this.queue) return false;
+    // Двоеточие в кастомном jobId BullMQ отвергает (у него на нём собственные ключи),
+    // причём ошибкой в рантайме, а не типом — отсюда дефис.
+    const bucket = Math.floor(Date.now() / (dedupWindowSec * 1000));
+    try {
+      await this.queue.add(name, {}, { jobId: `${name}-${bucket}` });
+      return true;
+    } catch (err) {
+      this.log.warn(`джоба ${name} не поставлена: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /**
    * Барьер «сделать один раз в окне» для действий БЕЗ строки в БД (алерты операторам).
    * Без Redis барьера нет — возвращаем true и пишем предупреждение, чтобы это было видно.
    */

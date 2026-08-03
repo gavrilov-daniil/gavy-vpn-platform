@@ -6,7 +6,7 @@ import "reflect-metadata";
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { and, eq } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import {
   cleanupOrg,
   closeDb,

@@ -1,14 +1,46 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
-import { Logger } from "@nestjs/common";
-import { setAuditSink } from "@vpn/core-kit";
-import { schema, type Database } from "@vpn/db";
+import { Logger, type INestApplication } from "@nestjs/common";
+import express, { type Request } from "express";
+import { setAuditSink } from "@corelink/core-kit";
+import { schema, type Database } from "@corelink/db";
 import { AppModule } from "./app.module.js";
 import { loadConfig } from "./config.js";
 import { DB } from "./db/db.module.js";
 import { JobRegistry } from "./workers/job.registry.js";
 import { QueueService } from "./workers/queue.service.js";
 import { SchedulerService } from "./workers/scheduler.service.js";
+
+/** Тело обычного запроса. Дефолт body-parser'а (100 КБ) с запасом хватает всему публичному API. */
+const PUBLIC_BODY_LIMIT = "256kb";
+/**
+ * Тело батча статистики от агента. На ноде с тысячей активных юзеров одна выгрузка —
+ * это тысячи дельт, и на 100 КБ она получала 413. Отвергнутый батч раньше вставал
+ * колом в очереди агента: учёт трафика по ноде замирал НАСОВСЕМ, а буфер рос.
+ * Агент режет батч сам (stats.maxCountersPerEntry), этот лимит — второй рубеж.
+ */
+const AGENT_BODY_LIMIT = "8mb";
+const AGENT_PATH_PREFIX = "/internal/agent";
+
+/**
+ * Парсеры тела регистрируются здесь вручную (`bodyParser: false` при create), потому
+ * что штатный парсер Nest один на всё приложение: поднять лимит для агента можно было
+ * бы только вместе с публичными эндпоинтами, а это 8 МБ на анонимный POST в /webhooks.
+ *
+ * `verify` повторяет то, что делает опция `rawBody: true` Nest: подписи вебхуков
+ * провайдеров считаются по сырым байтам тела, а не по пересобранному JSON.
+ *
+ * Первым идёт парсер агента: body-parser выставляет `req._body` и следующий за ним
+ * общий парсер уже ничего не делает.
+ */
+function installBodyParsers(app: INestApplication): void {
+  const verify = (req: Request & { rawBody?: Buffer }, _res: unknown, buf: Buffer) => {
+    if (Buffer.isBuffer(buf)) req.rawBody = buf;
+  };
+  app.use(AGENT_PATH_PREFIX, express.json({ limit: AGENT_BODY_LIMIT, verify }));
+  app.use(express.json({ limit: PUBLIC_BODY_LIMIT, verify }));
+  app.use(express.urlencoded({ extended: true, limit: PUBLIC_BODY_LIMIT, verify }));
+}
 
 /**
  * Аудит исходящих HTTP: core-kit маскирует секреты и зовёт этот приёмник, приёмник пишет строку.
@@ -87,8 +119,8 @@ async function bootstrap() {
     );
   }
 
-  // rawBody нужен для проверки подписей вебхуков по сырым байтам тела
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  installBodyParsers(app);
   installAuditSink(app.get<Database>(DB), cfg.defaultOrgId);
   await app.listen(cfg.port);
   log.log(`core api on :${cfg.port} (org=${cfg.defaultOrgId})`);

@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { randomInt } from "node:crypto";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { LINK_CODE_ALPHABET } from "./attribution.service.js";

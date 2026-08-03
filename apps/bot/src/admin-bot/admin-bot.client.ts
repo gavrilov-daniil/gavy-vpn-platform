@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { request } from "@vpn/core-kit";
+import { request } from "@corelink/core-kit";
 import { loadConfig } from "../config.js";
 
 interface TelegramResponse<T> {

@@ -1,5 +1,5 @@
 import { Body, Controller, Headers, HttpCode, Logger, Post, UnauthorizedException } from "@nestjs/common";
-import { safeCompare } from "@vpn/core-kit";
+import { safeCompare } from "@corelink/core-kit";
 import type { Update } from "grammy/types";
 import { loadConfig } from "../config.js";
 import { BotService } from "./bot.service.js";

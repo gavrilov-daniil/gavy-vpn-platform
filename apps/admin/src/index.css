@@ -685,6 +685,33 @@ select {
   word-break: break-word;
 }
 
+/* Подсказка ИИ — черновик рядом с перепиской, отправляет его всё равно оператор. */
+.suggestion {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.suggestion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.suggestion-head .strong {
+  margin-right: 8px;
+}
+
+.suggestion .row-actions {
+  justify-content: flex-start;
+}
+
 .reply {
   margin-top: 14px;
   border-top: 1px solid var(--border);

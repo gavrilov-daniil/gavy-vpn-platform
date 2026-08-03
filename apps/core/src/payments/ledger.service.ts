@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 
@@ -85,6 +85,9 @@ export class LedgerService {
     const [plan] = await tx.select().from(schema.plan).where(eq(schema.plan.id, payment.planId)).limit(1);
     if (!plan) return { action: "none" as const };
 
+    // Порядок обязателен: у клиента бывает вторая подписка, и без сортировки
+    // Postgres отдаёт произвольную строку — оплата продлевала бы не ту, что бот
+    // показал клиенту. Тот же порядок в SubscribersService.findSubscription.
     const [subscription] = await tx
       .select()
       .from(schema.subscription)
@@ -94,6 +97,7 @@ export class LedgerService {
           eq(schema.subscription.subscriberId, payment.subscriberId),
         ),
       )
+      .orderBy(asc(schema.subscription.createdAt), asc(schema.subscription.id))
       .limit(1);
     if (!subscription) return { action: "none" as const };
 

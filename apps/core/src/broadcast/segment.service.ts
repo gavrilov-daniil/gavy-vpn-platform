@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, eq, gte, isNotNull, lt, lte, sql, type SQL } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 

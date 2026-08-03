@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { projectVariants, validateConfig, type XrayConfig } from "@vpn/xray-config";
+import { projectVariants, validateConfig, type XrayConfig } from "@corelink/xray-config";
 import { loadConfig } from "../config.js";
 import { BotClient } from "../bot/bot.client.js";
 import { RateLimitService } from "../common/rate-limit.service.js";
@@ -80,9 +80,9 @@ export class SubscriptionService {
     // защита эндпоинта: только Happ (несущий барьер — не единственный, см. docs/architecture.md)
     if (!HAPP_UA.test(req.userAgent)) return this.stub("Откройте подписку в приложении Happ.");
     if (!sub) return this.stub("Подписка не найдена.");
-    if (sub.status === "disabled" || sub.status === "suspended") {
-      return this.stub("Подписка приостановлена.");
-    }
+
+    const denial = accessDenial(sub);
+    if (denial) return this.stub(denial);
 
     await this.markVisit(sub, req.userAgent);
 
@@ -204,12 +204,24 @@ export class SubscriptionService {
   }
 
   /**
-   * Штатное пользовательское состояние: подписки нет, приостановлена, зашли не из Happ.
+   * Штатное пользовательское состояние: подписки нет, истекла, приостановлена, зашли не из Happ.
    * Только здесь допустим 200 с заглушкой — клиент осознанно заменяет конфиг на сообщение.
+   *
+   * Заглушка обязана быть НЕРАБОТОСПОСОБНЫМ профилем. В списке Happ она выглядит как
+   * обычный профиль, и человек по ней жмёт «Подключить»: с freedom-outbound он получал
+   * бы «Connected» и весь трафик НАПРЯМУЮ, будучи уверенным, что сидит под VPN. Для
+   * аудитории в РФ это худший возможный исход, хуже честной ошибки подключения.
+   * Поэтому единственный outbound — blackhole, и catch-all уводит в него весь трафик.
+   * Причину человек читает в remarks — заглушка нужна ровно для этого.
    */
   private stub(message: string): DeliveryResult {
-    // заглушка тем же форматом подписки (один профиль без каналов), чтобы клиент показал сообщение
-    const body = JSON.stringify([{ remarks: message, outbounds: [{ tag: "freedom", protocol: "freedom" }] }]);
+    const body = JSON.stringify([
+      {
+        remarks: message,
+        outbounds: [{ tag: "block", protocol: "blackhole" }],
+        routing: { rules: [{ type: "field", network: "tcp,udp", outboundTag: "block" }] },
+      },
+    ]);
     return { kind: "stub", status: 200, body, headers: { "content-type": "application/json; charset=utf-8" } };
   }
 
@@ -241,6 +253,32 @@ export class SubscriptionService {
     this.lastAlertAt = now;
     await this.bot.alert(`🚨 Подписка не собирается, клиентам уходит 503\n<code>${reason.slice(0, 300)}</code>`);
   }
+}
+
+/** Статусы, которым тело подписки положено. Всё остальное — заглушка. */
+const ACCESS_STATUSES = new Set(["active", "trial"]);
+
+/**
+ * Гейт доступа к телу подписки — allowlist, а не список запрещённых статусов.
+ *
+ * В теле лежит карта сети: address/port/sni/pbk/sid ВСЕХ каналов и front-хоста.
+ * На blocklist'е (`disabled|suspended`) её получал любой, кто когда-то нажал /start:
+ * `inactive` (статус при создании подписки) и `expired` (его ставит джоба) проходили
+ * дальше. Доступа на нодах у них нет, но инвентарь сети для DPI утекал.
+ * Поэтому новый статус обязан быть добавлен сюда явно, а не получить доступ по умолчанию.
+ *
+ * Срок проверяется здесь же, а не только джобой: между истечением и её прогоном
+ * статус ещё `active`, и подписка успела бы отдать конфиг.
+ */
+function accessDenial(sub: FoundSubscription): string | null {
+  if (sub.status === "disabled" || sub.status === "suspended") return "Подписка приостановлена.";
+  if (sub.status === "expired") return "Подписка истекла, продлите её в боте.";
+  if (!ACCESS_STATUSES.has(sub.status)) return "Подписка не активна — оформите доступ в боте.";
+  // expire_at IS NULL = бессрочная (ручная выдача, служебные подписки)
+  if (sub.expireAt && new Date(sub.expireAt).getTime() <= Date.now()) {
+    return "Подписка истекла, продлите её в боте.";
+  }
+  return null;
 }
 
 function clip(value: string | undefined, max: number): string | undefined {

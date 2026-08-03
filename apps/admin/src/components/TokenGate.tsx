@@ -8,8 +8,8 @@ interface Props {
 
 /**
  * Вход в админку: core требует заголовок x-admin-token на всех /api/admin/*.
- * Это не аутентификация пользователей, а один общий секрет деплоя — полноценные
- * учётки появятся отдельной задачей.
+ * В поле вводится либо токен сессии оператора (его отдаёт POST /api/admin/auth/login),
+ * либо переходный общий ADMIN_TOKEN. Формы логина по email/паролю здесь пока нет.
  */
 export default function TokenGate({ children }: Props) {
   const [token, setToken] = useState(getAdminToken);

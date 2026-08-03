@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, gt, inArray, lt } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../../db/db.module.js";
 import { loadConfig } from "../../config.js";
 import { AlertService, dayBucket } from "../alert.service.js";

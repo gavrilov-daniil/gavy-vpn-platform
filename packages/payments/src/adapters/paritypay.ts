@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
-import { request } from "@vpn/core-kit";
-import { safeCompare } from "@vpn/core-kit";
+import { request } from "@corelink/core-kit";
+import { safeCompare } from "@corelink/core-kit";
 import { resolveProviderBaseUrl } from "../provider-urls.js";
 import {
   kopeksToRubles,

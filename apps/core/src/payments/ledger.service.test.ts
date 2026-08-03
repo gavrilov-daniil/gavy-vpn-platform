@@ -8,7 +8,7 @@ import "reflect-metadata";
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { and, eq, sql } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import {
   TEST_ORG_ID,
   cleanupOrg,
@@ -291,6 +291,40 @@ describe("LedgerService: фулфилмент оплаты", () => {
     );
 
     assert.deepEqual(await granted(), [squadB.id], "доступ старого тарифа не должен накапливаться поверх нового");
+  });
+
+  it("при двух подписках продлевается та же, что показывает бот, — самая ранняя", async () => {
+    const subscriber = await createSubscriber(db);
+    const expireAt = new Date(Date.now() + 10 * DAY_MS);
+    // Порядок вставки намеренно обратный порядку создания: без orderBy Postgres
+    // вернул бы произвольную строку, и оплата ушла бы не в ту подписку.
+    const newer = await createSubscription(db, subscriber.id, { expireAt, createdAt: new Date(Date.now() - DAY_MS) });
+    const older = await createSubscription(db, subscriber.id, {
+      expireAt,
+      createdAt: new Date(Date.now() - 10 * DAY_MS),
+    });
+
+    const plan = await createPlan(db, { periodDays: 30, priceKopeks: 50_000 });
+    await fulfillPlan(
+      await createPayment(db, {
+        subscriberId: subscriber.id,
+        purpose: "plan",
+        planId: plan.id,
+        amountKopeks: 50_000,
+        status: "paid",
+      }),
+    );
+
+    assert.equal(
+      Math.round(((await reload(older.id)).expireAt!.getTime() - expireAt.getTime()) / DAY_MS),
+      30,
+      "продлить обязано подписку, которую бот отдал клиенту (самую раннюю)",
+    );
+    assert.equal(
+      (await reload(newer.id)).expireAt?.getTime(),
+      expireAt.getTime(),
+      "вторая подписка клиента не должна получать чужие дни",
+    );
   });
 
   it("оплата тарифа без подписки не теряет деньги: баланс пополнен, дней нет", async () => {

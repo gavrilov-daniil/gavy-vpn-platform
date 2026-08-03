@@ -1,9 +1,16 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
-import { schema, type Database } from "@vpn/db";
-import { maskBody } from "@vpn/core-kit";
-import { getAdapter, type PaymentPurpose, type WebhookRequest } from "@vpn/payments";
+import { schema, type Database } from "@corelink/db";
+import { maskBody } from "@corelink/core-kit";
+import { getAdapter, type PaymentPurpose, type WebhookRequest } from "@corelink/payments";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { MerchantService } from "./merchant.service.js";
@@ -115,11 +122,11 @@ export class PaymentService {
    *   3. атомарный claim статуса (compare-and-swap),
    *   4. фулфилмент в той же транзакции.
    * Вызывающий отвечает провайдеру 200 даже при внутренней ошибке — иначе он завалит ретраями.
+   * Исключение — сбои ДО начала обработки: они просят повтор (см. loadMerchants).
    */
   async handleWebhook(provider: string, req: WebhookRequest) {
     const adapter = getAdapter(provider);
-    const merchants = await this.merchants.findByProvider(provider);
-    if (merchants.length === 0) throw new NotFoundException(`нет включённых мерчантов ${provider}`);
+    const merchants = await this.loadMerchants(provider);
 
     // несколько аккаунтов одного провайдера: подпись скажет, чей это вебхук
     const merchant = merchants.find((m) => adapter.verifyWebhook(m, req));
@@ -165,6 +172,28 @@ export class PaymentService {
     }
 
     return this.markPaidAndFulfill(payment.id, parsed.providerRef, parsed.raw);
+  }
+
+  /**
+   * Мерчанты вебхука грузятся отдельно, потому что оба здешних сбоя означают одно:
+   * обработка НЕ начиналась, и повтор после починки конфига её спасёт.
+   *
+   * Расшифровка кредов падает при сменённом SECRETS_MASTER_KEY или битой строке
+   * credentials — попади это в общий catch, провайдер получил бы 200 «принято»,
+   * прекратил ретраи, и все входящие платежи потерялись бы молча, без единого 5xx.
+   */
+  private async loadMerchants(provider: string) {
+    let merchants: Awaited<ReturnType<MerchantService["findByProvider"]>>;
+    try {
+      merchants = await this.merchants.findByProvider(provider);
+    } catch (err) {
+      this.log.error(
+        `webhook ${provider}: креды мерчантов не читаются (${err instanceof Error ? err.message : String(err)}) — просим повтор`,
+      );
+      throw new ServiceUnavailableException(`креды мерчантов ${provider} не читаются`);
+    }
+    if (merchants.length === 0) throw new NotFoundException(`нет включённых мерчантов ${provider}`);
+    return merchants;
   }
 
   /**

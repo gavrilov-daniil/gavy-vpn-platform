@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import {
   buildNodeConfig,
   configHash,
@@ -8,7 +8,7 @@ import {
   type CascadeOutbound,
   type NodeInbound,
   type NodeUser,
-} from "@vpn/xray-config";
+} from "@corelink/xray-config";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 
@@ -338,7 +338,7 @@ export class NodeStateService {
 function dedupeUsers(users: NodeUser[]): NodeUser[] {
   const byKey = new Map<string, NodeUser>();
   for (const u of users) {
-    const key = `${u.inboundTag} ${u.uuid}`;
+    const key = `${u.inboundTag}\u0000${u.uuid}`;
     if (!byKey.has(key)) byKey.set(key, u);
   }
   return [...byKey.values()].sort(

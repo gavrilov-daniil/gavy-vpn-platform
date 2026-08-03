@@ -16,6 +16,15 @@
 
 Админка — статика, собирается в volume и отдаётся caddy.
 
+Что на каком домене:
+
+| Домен | Пути |
+|---|---|
+| `SUB_PUBLIC_HOST` | `/auto/*`, `/api/sub/*` (выдача), `/webhooks/*` (платежи), `/tg` (бот), `/internal/agent/*` (агенты нод), `/healthz` |
+| `ADMIN_PUBLIC_HOST` | `/api/*` (админский API) и статика админки |
+
+Агенты ходят на домен подписки, а не админки: ноды стоят у разных хостеров, а админку разумно закрывать по IP. Всё остальное `/internal/*` (ручки бота и воркеров) наружу не выставлено вообще — только внутри docker-сети.
+
 ## Минимальные требования
 
 2 vCPU / 4 ГБ / 40 ГБ. Меньше не стоит: Postgres, Redis и три Node-процесса. Docker и Docker Compose v2.
@@ -23,8 +32,8 @@
 ## Порядок
 
 ```bash
-git clone https://github.com/gavrilov-daniil/gavy-vpn-platform.git
-cd gavy-vpn-platform
+git clone https://github.com/gavrilov-daniil/corelink.git
+cd corelink
 cp .env.example .env
 ```
 
@@ -34,19 +43,22 @@ cp .env.example .env
 |---|---|
 | `POSTGRES_PASSWORD` | пароль БД |
 | `SECRETS_MASTER_KEY` | ключ шифрования кредов мерчантов, **минимум 16 символов**; смена делает сохранённые ключи нечитаемыми |
-| `ADMIN_TOKEN` | переходный вход в админку; после заведения учёток оператора можно убрать |
+| `ADMIN_TOKEN` | переходный вход в админку; убрать его после заведения учёток пока нельзя без потери удобного входа — см. «Первые шаги в админке» |
 | `SERVICE_TOKEN` | общий секрет core↔бот |
 | `AGENT_TOKEN` | переходный секрет агентов; после энроллмента всех нод убрать |
 | `SUB_PUBLIC_HOST` | **домен подписки — менять нельзя**, он зашит в сохранённых у клиентов ссылках |
 | `ADMIN_PUBLIC_HOST` | отдельный домен админки |
 | `BOT_TOKEN`, `BOT_WEBHOOK_SECRET` | клиентский бот; при заданном `BOT_WEBHOOK_URL` секрет обязателен, иначе бот не стартует |
 
-Запуск:
+Запуск. Порядок важен дважды: миграции накатываются **до** старта приложений (иначе новый код работает против старой схемы), а бот поднимается **после переноса данных** — см. «Перенос данных с действующей панели».
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d postgres redis
 docker compose -f docker-compose.prod.yml run --rm migrate
+docker compose -f docker-compose.prod.yml up -d --build core worker admin-build caddy
 ```
+
+Команда миграций печатает `migrations: journal=N applied=N`. Если `applied` меньше — часть миграций пропущена, и она завершится с ошибкой (`packages/db/drizzle/meta/README.md`).
 
 Проверка:
 
@@ -57,36 +69,56 @@ curl -s -o /dev/null -w '%{http_code}\n' https://$ADMIN_PUBLIC_HOST/api/admin/me
 
 ## Первые шаги в админке
 
-1. Завести оператора и уйти с общего токена:
+1. Завести оператора:
    ```bash
    curl -X POST https://$ADMIN_PUBLIC_HOST/api/admin/auth/operators \
      -H "x-admin-token: $ADMIN_TOKEN" -H 'content-type: application/json' \
      -d '{"email":"you@example.com","password":"…","role":"admin"}'
    ```
-   После этого `ADMIN_TOKEN` из `.env` стоит убрать и перезапустить core.
+   Вход учёткой — тоже `curl`: формы логина по email/паролю в админке **нет**, `TokenGate` принимает только строку токена.
+   ```bash
+   curl -X POST https://$ADMIN_PUBLIC_HOST/api/admin/auth/login \
+     -H 'content-type: application/json' \
+     -d '{"email":"you@example.com","password":"…"}'          # в ответе token — его и вставить в поле админки
+   ```
+   Токен сессии живёт 7 суток, дальше процедуру надо повторять. Поэтому убирать `ADMIN_TOKEN` из `.env` сразу **не** рекомендуется: пока формы логина нет, единственным входом останется этот `curl`. Осмысленно это только там, где общий токен считается недопустимым риском (`security.md`, п. 8).
 2. Подключить мерчантов (экран «Мерчанты»): ключи шифруются при сохранении, включение — тумблером, без рестарта.
 3. Завести ноды, выпустить bootstrap-токены, поставить агентов (`apps/node-agent/README.md`).
 
 ## Перенос данных с действующей панели
+
+Делается **до того, как бот начнёт принимать пользователей**. Клиент, нажавший `/start` раньше импорта, получает подписку со свежесгенерированным `short_uuid`; импорт такую подписку присвоит (перенесёт в неё идентичность панели), но пока он не прошёл, клиент ходит по ссылке, которой в новой БД нет. Бот с заданным `BOT_TOKEN` принимает апдейты и без вебхука — он уходит в long polling, поэтому «не переключать DNS» тут не защищает: сервис надо просто не поднимать.
 
 ```bash
 # в .env: REMNAWAVE_URL и REMNAWAVE_TOKEN (только чтение)
 curl -X POST https://$ADMIN_PUBLIC_HOST/api/admin/import/remnawave \
   -H "x-admin-token: …" -H 'content-type: application/json' -d '{}'          # dry-run
 curl -X POST … -d '{"apply":true,"withDevices":true}'                        # запись
+
+docker compose -f docker-compose.prod.yml up -d --build bot                  # бот — только теперь
 ```
 
 Импорт идемпотентен: повторный прогон обновляет и не двоит. Идентичность (`short_uuid`, `vless_uuid`) переносится дословно — иначе клиенты молча отвалятся.
+
+Что смотреть в отчёте перед cutover — счётчики, по которым видно молчаливый провал:
+
+| Поле | Чем плохо расхождение |
+|---|---|
+| `squadInbounds: {total, created}` | `created` заметно меньше `total` — часть squad'ов ничего не открывает: конфиг клиент получит, а Xray на ноде разорвёт хендшейк. Обычная причина — ноды с этими inbound-тегами ещё не заведены (связывание идёт по тегу inbound'а) |
+| `subscriptionsWithoutSquad` | столько клиентов после переключения останутся без доступа к нодам |
+| `users.adopted` | столько подписок, заведённых ботом до импорта, переведены на идентичность панели. Больше нуля — бота подняли раньше времени |
+| `warnings` | каждая строка = ручная проверка; пустой squad назван там тихим провалом миграции |
 
 ## Обновление
 
 ```bash
 git pull
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml run --rm migrate
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-Миграции применяются отдельной командой, а не на старте контейнера: иначе два одновременно поднявшихся инстанса накатывали бы их параллельно.
+Миграции применяются отдельной командой, а не на старте контейнера: иначе два одновременно поднявшихся инстанса накатывали бы их параллельно. Сначала `build`, потом миграции, потом `up`: так новый код не успевает поработать со старой схемой.
 
 ## Резервные копии
 

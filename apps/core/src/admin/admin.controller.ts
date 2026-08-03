@@ -1,6 +1,6 @@
 import { Controller, Get, Inject } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 
@@ -34,6 +34,14 @@ export class AdminController {
       name: node.name,
       roles: node.roles,
       status: node.status,
+      // поля правки: форма редактирования ноды берёт текущие значения отсюда,
+      // отдельного GET nodes/:id ради этого заводить незачем
+      serverId: node.serverId,
+      serverHostname: server?.hostname ?? null,
+      configProfileId: node.configProfileId,
+      consumptionMultiplier: node.consumptionMultiplier,
+      trackTraffic: node.trackTraffic,
+      sortOrder: node.sortOrder,
       address: server?.primaryIp ?? null,
       country: server?.country ?? null,
       lastHeartbeatAt: server?.lastHeartbeatAt ?? null,

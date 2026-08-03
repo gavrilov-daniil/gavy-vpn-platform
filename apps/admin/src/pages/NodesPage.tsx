@@ -1,15 +1,25 @@
 import { useEffect, useState } from "react";
 import {
+  NODE_ROLES,
+  NODE_STATUSES,
   createCascade,
+  createNode,
+  deleteNode,
   errorMessage,
   getCascades,
+  getConfigProfiles,
   getDesiredState,
   getNodes,
+  getServers,
+  issueEnrollment,
   rebuildNode,
   refreshCascade,
+  updateNode,
   type Cascade,
+  type ConfigProfile,
   type DesiredState,
   type Node,
+  type Server,
 } from "../api";
 import { useResource } from "../useResource";
 import { formatDateTime } from "../format";
@@ -17,6 +27,8 @@ import Card from "../components/Card";
 import Table, { type Column } from "../components/Table";
 import Modal from "../components/Modal";
 import Field from "../components/Field";
+import Toggle from "../components/Toggle";
+import CopyButton from "../components/CopyButton";
 import StatusBadge from "../components/StatusBadge";
 import EmptyState from "../components/EmptyState";
 import ErrorBox from "../components/ErrorBox";
@@ -30,13 +42,20 @@ interface RebuildState {
 
 export default function NodesPage() {
   const page = useResource(async () => {
-    const [nodes, cascades] = await Promise.all([getNodes(), getCascades()]);
-    return { nodes, cascades };
+    const [nodes, cascades, servers, profiles] = await Promise.all([
+      getNodes(),
+      getCascades(),
+      getServers(),
+      getConfigProfiles(),
+    ]);
+    return { nodes, cascades, servers, profiles };
   });
 
   const [rebuilds, setRebuilds] = useState<Record<string, RebuildState>>({});
   const [stateNodeId, setStateNodeId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [nodeForm, setNodeForm] = useState<{ node?: Node } | null>(null);
+  const [enrollingNode, setEnrollingNode] = useState<Node | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -75,7 +94,7 @@ export default function NodesPage() {
   if (page.error) return <ErrorBox error={page.error} onRetry={page.reload} />;
   if (!page.data) return null;
 
-  const { nodes, cascades } = page.data;
+  const { nodes, cascades, servers, profiles } = page.data;
   const nodeName = (id: string | null) => (id ? (nodes.find((n) => n.id === id)?.name ?? id) : "—");
 
   const nodeColumns: Column<Node>[] = [
@@ -85,12 +104,30 @@ export default function NodesPage() {
       render: (n) => (
         <div>
           <div className="strong">{n.name}</div>
-          <div className="muted small mono">{n.id}</div>
+          <div className="muted small mono">
+            {n.serverHostname ?? n.address ?? n.id}
+            {n.country ? ` · ${n.country}` : ""}
+          </div>
         </div>
       ),
     },
     { key: "roles", title: "Роли", render: (n) => n.roles.join(" + ") || "—" },
     { key: "status", title: "Статус", render: (n) => <StatusBadge status={n.status} /> },
+    {
+      key: "converged",
+      title: "Конфиг",
+      render: (n) => (
+        <div>
+          <StatusBadge
+            status={n.converged ? "ok" : "pending"}
+            label={n.converged ? `сошёлся, v${n.desiredVersion ?? 0}` : `не сошёлся, v${n.desiredVersion ?? 0}`}
+          />
+          <div className="muted small mono">
+            {shortHash(n.desiredConfigHash)} → {shortHash(n.appliedConfigHash)}
+          </div>
+        </div>
+      ),
+    },
     { key: "heartbeat", title: "Heartbeat", render: (n) => formatDateTime(n.lastHeartbeatAt) },
     {
       key: "rebuild",
@@ -108,6 +145,12 @@ export default function NodesPage() {
       align: "right",
       render: (n) => (
         <div className="row-actions">
+          <button type="button" className="btn btn-sm" onClick={() => setNodeForm({ node: n })}>
+            Изменить
+          </button>
+          <button type="button" className="btn btn-sm" onClick={() => setEnrollingNode(n)}>
+            Токен агента
+          </button>
           <button type="button" className="btn btn-sm" onClick={() => rebuild(n)} disabled={rebuilds[n.id]?.pending}>
             Пересобрать конфиг
           </button>
@@ -165,10 +208,23 @@ export default function NodesPage() {
 
       <Card
         title="Ноды"
-        subtitle="Applied-hash агента список нод не отдаёт — сходимость видна по статусу каскадов и desired-state."
+        subtitle="«Сошёлся» — агент применил ровно ту версию конфига, которую собрала панель. Пока нет, правки до ноды не доехали."
+        actions={
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={servers.length === 0 || profiles.length === 0}
+            onClick={() => setNodeForm({})}
+          >
+            Создать ноду
+          </button>
+        }
       >
         {nodes.length === 0 ? (
-          <EmptyState text="Нод нет" hint="Ноды заводятся сидингом и энроллментом агента." />
+          <EmptyState
+            text="Нод нет"
+            hint="Заведите сервер и config-профиль в разделе «Инфраструктура», затем создайте ноду здесь."
+          />
         ) : (
           <Table columns={nodeColumns} rows={nodes} rowKey={(n) => n.id} />
         )}
@@ -196,6 +252,19 @@ export default function NodesPage() {
       </Card>
 
       {stateNodeId && <DesiredStateModal nodeId={stateNodeId} onClose={() => setStateNodeId(null)} />}
+      {nodeForm && (
+        <NodeModal
+          node={nodeForm.node}
+          servers={servers}
+          profiles={profiles}
+          onClose={() => setNodeForm(null)}
+          onSaved={() => {
+            setNodeForm(null);
+            page.reload();
+          }}
+        />
+      )}
+      {enrollingNode && <EnrollmentModal node={enrollingNode} onClose={() => setEnrollingNode(null)} />}
       {creating && (
         <CascadeModal
           nodes={nodes}
@@ -207,6 +276,233 @@ export default function NodesPage() {
         />
       )}
     </>
+  );
+}
+
+function shortHash(hash: string | null): string {
+  return hash ? hash.slice(0, 10) : "—";
+}
+
+interface NodeModalProps {
+  node?: Node;
+  servers: Server[];
+  profiles: ConfigProfile[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function NodeModal({ node, servers, profiles, onClose, onSaved }: NodeModalProps) {
+  const [serverId, setServerId] = useState(node?.serverId ?? servers[0]?.id ?? "");
+  const [configProfileId, setConfigProfileId] = useState(node?.configProfileId ?? "");
+  const [name, setName] = useState(node?.name ?? "");
+  const [roles, setRoles] = useState<string[]>(node?.roles ?? ["exit"]);
+  const [status, setStatus] = useState(node?.status ?? "provisioning");
+  const [multiplier, setMultiplier] = useState(String(node?.consumptionMultiplier ?? 1));
+  const [trackTraffic, setTrackTraffic] = useState(node?.trackTraffic ?? true);
+  const [sortOrder, setSortOrder] = useState(String(node?.sortOrder ?? 0));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // профиль занимает ровно одна нода — свободные плюс свой собственный
+  const available = profiles.filter((p) => !p.nodeId || p.nodeId === node?.id);
+
+  const toggleRole = (role: string, on: boolean) =>
+    setRoles((prev) => (on ? [...new Set([...prev, role])] : prev.filter((r) => r !== role)));
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body = {
+        serverId,
+        configProfileId: configProfileId || available[0]?.id || "",
+        name: name.trim(),
+        roles,
+        status,
+        consumptionMultiplier: Number(multiplier) || 1,
+        trackTraffic,
+        sortOrder: Number(sortOrder) || 0,
+      };
+      if (node) await updateNode(node.id, body);
+      else await createNode(body);
+      onSaved();
+    } catch (e) {
+      setError(errorMessage(e));
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!node || !window.confirm("Удалить ноду? Сработает, только если на неё нет ссылок.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteNode(node.id);
+      onSaved();
+    } catch (e) {
+      setError(errorMessage(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={node ? `Нода «${node.name}»` : "Новая нода"}
+      onClose={onClose}
+      footer={
+        <>
+          {error && <span className="err">{error}</span>}
+          {node && (
+            <button type="button" className="btn" disabled={busy} onClick={remove}>
+              Удалить
+            </button>
+          )}
+          <button type="button" className="btn" onClick={onClose}>
+            Отмена
+          </button>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={submit}>
+            {busy ? "Сохраняем…" : node ? "Сохранить" : "Создать"}
+          </button>
+        </>
+      }
+    >
+      <div className="grid-2">
+        <Field label="Сервер" required>
+          <select value={serverId} onChange={(e) => setServerId(e.target.value)}>
+            {servers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.hostname} ({s.primaryIp})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label="Config-профиль"
+          required
+          hint="один профиль — одна нода: Reality-ключи лежат на его inbound'ах"
+        >
+          <select value={configProfileId} onChange={(e) => setConfigProfileId(e.target.value)}>
+            <option value="">— выберите —</option>
+            {available.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="grid-2">
+        <Field label="Название" required>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="de1-exit" />
+        </Field>
+        <Field label="Статус" hint="метка для оператора; агент сам ставит active после первого отчёта">
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            {NODE_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Роли" required hint="первая роль определяет форму конфига ноды">
+        <div className="checks">
+          {NODE_ROLES.map((role) => (
+            <label key={role} className="check">
+              <input type="checkbox" checked={roles.includes(role)} onChange={(e) => toggleRole(role, e.target.checked)} />
+              <span>{role}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+
+      <div className="grid-2">
+        <Field label="Множитель расхода" hint="во сколько раз трафик этой ноды дороже для подписки">
+          <input value={multiplier} onChange={(e) => setMultiplier(e.target.value)} inputMode="numeric" />
+        </Field>
+        <Field label="Порядок" hint="меньше — выше в списках">
+          <input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} inputMode="numeric" />
+        </Field>
+      </div>
+
+      <Field label="Считать трафик" hint="выключенная нода не расходует лимит подписки">
+        <Toggle checked={trackTraffic} onChange={setTrackTraffic} label={trackTraffic ? "да" : "нет"} />
+      </Field>
+    </Modal>
+  );
+}
+
+/**
+ * Bootstrap-токен показывается ровно один раз: в БД лежит только его sha256.
+ * Поэтому окно не закрывается автоматически и не перезагружает список.
+ */
+function EnrollmentModal({ node, onClose }: { node: Node; onClose: () => void }) {
+  const [token, setToken] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const issue = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await issueEnrollment(node.id);
+      setToken(result.bootstrapToken);
+      setExpiresAt(result.bootstrapExpiresAt);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={`Энроллмент ноды «${node.name}»`}
+      onClose={onClose}
+      footer={
+        <>
+          {error && <span className="err">{error}</span>}
+          <button type="button" className="btn" onClick={onClose}>
+            Закрыть
+          </button>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={issue}>
+            {busy ? "Выпускаем…" : token ? "Выпустить заново" : "Выпустить токен"}
+          </button>
+        </>
+      }
+    >
+      <div className="kv">
+        <div>
+          <span className="kv-key">NODE_ID</span>
+          <span className="kv-val mono">{node.id}</span>
+        </div>
+        <div>
+          <span className="kv-key">Сервер</span>
+          <span className="kv-val">{node.serverHostname ?? node.address ?? "—"}</span>
+        </div>
+      </div>
+
+      {token ? (
+        <>
+          <h3 className="form-section">Bootstrap-токен</h3>
+          <pre className="code">{token}</pre>
+          <div className="row-actions">
+            <CopyButton value={token} title="Скопировать токен" />
+          </div>
+          <p className="warn small">
+            Значение видно один раз: в базе лежит только его хеш. Годен до {formatDateTime(expiresAt)}.
+          </p>
+        </>
+      ) : (
+        <p className="muted small">
+          Выпуск инвалидирует прежний неиспользованный токен этой ноды. Действующий токен уже энролленного агента не
+          отзывается — нода продолжит работать, пока агент не пройдёт энроллмент заново.
+        </p>
+      )}
+    </Modal>
   );
 }
 

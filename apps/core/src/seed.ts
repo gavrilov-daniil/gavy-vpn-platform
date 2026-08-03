@@ -2,10 +2,10 @@
  * Демо-seed для M0: делает GET /auto/<SHORT_UUID> реально работающим и даёт харнесс спайку 1
  * (golden byte-diff нового генератора против Remnawave). Идемпотентен (onConflictDoNothing).
  *
- * Запуск:  DATABASE_URL=... pnpm --filter @vpn/core seed
+ * Запуск:  DATABASE_URL=... pnpm --filter @corelink/core seed
  * Проверка: curl -H "User-Agent: Happ/1" localhost:3100/auto/demoshortuuid0001 | jq .
  */
-import { createDb, schema } from "@vpn/db";
+import { createDb, schema } from "@corelink/db";
 
 const ORG = "00000000-0000-0000-0000-000000000001";
 const SHORT_UUID = "demoshortuuid0001";

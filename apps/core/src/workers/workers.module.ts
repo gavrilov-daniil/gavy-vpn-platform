@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AiModule } from "../ai/ai.module.js";
 import { BotModule } from "../bot/bot.module.js";
 import { BroadcastModule } from "../broadcast/broadcast.module.js";
 import { NodesModule } from "../nodes/nodes.module.js";
@@ -18,6 +19,7 @@ import { TouchpointsRunJob } from "./jobs/touchpoints-run.job.js";
 import { BroadcastResumeJob } from "./jobs/broadcast-resume.job.js";
 import { PaymentReconcileJob } from "./jobs/payment-reconcile.job.js";
 import { AbuseScanJob } from "./jobs/abuse-scan.job.js";
+import { AiSuggestJob } from "./jobs/ai-suggest.job.js";
 import { MaintenanceJob } from "./jobs/maintenance.job.js";
 
 @Module({
@@ -26,6 +28,7 @@ import { MaintenanceJob } from "./jobs/maintenance.job.js";
     BroadcastModule, // рассылки и касания — их run() вызывается, а не переписывается
     PaymentsModule, // ledger для реф-наград
     BotModule, // алерты операторам
+    AiModule, // подсказки поддержке
   ],
   controllers: [WorkersAdminController],
   providers: [
@@ -42,6 +45,7 @@ import { MaintenanceJob } from "./jobs/maintenance.job.js";
     BroadcastResumeJob,
     PaymentReconcileJob,
     AbuseScanJob,
+    AiSuggestJob,
     MaintenanceJob,
     JobRegistry,
   ],

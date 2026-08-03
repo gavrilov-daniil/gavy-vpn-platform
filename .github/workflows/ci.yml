@@ -36,8 +36,21 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # Redis-режимы лимитера и идемпотентности скипаются без адреса, а проверяют они
+      # ровно то, что не воспроизводится в памяти: общий барьер между инстансами api.
+      # Дефект «первые запросы после старта уходят мимо барьера» всплыл только здесь.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       DATABASE_URL: postgres://vpn:vpn@localhost:5432/vpn_platform
+      TEST_REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
 
@@ -55,7 +68,7 @@ jobs:
       - run: pnpm typecheck
 
       - name: Схема для тестов
-        run: pnpm --filter @vpn/db build && pnpm --filter @vpn/db migrate
+        run: pnpm --filter @corelink/db build && pnpm --filter @corelink/db migrate
 
       - run: pnpm test
 
@@ -124,9 +137,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @vpn/db build
+      - run: pnpm --filter @corelink/db build
 
-      - run: pnpm --filter @vpn/db migrate
+      - run: pnpm --filter @corelink/db migrate
 
       # Проверка ловит грабли с `when` в _journal.json: drizzle применяет миграции
       # по возрастанию `when` и МОЛЧА пропускает ту, у которой он меньше уже
@@ -157,3 +170,88 @@ jobs:
               }
             }
           '
+
+  # Деплой-путь. Появился после того, как аудит нашёл три P0 разом: Caddy падал на
+  # пустом ACME_EMAIL, команда миграций ссылалась на несуществующий drizzle-kit,
+  # а /internal/agent/* не проксировался — ни одна нода не могла бы подключиться.
+  # Ни один из трёх не ловился прежним CI: он собирал код, но не образы и не стенд.
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Фиктивные, но валидные по формату значения: без них compose не раскрывается
+      - name: Тестовый .env
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=ci-postgres-pw
+          SECRETS_MASTER_KEY=ci-fake-master-key-0123456789
+          ADMIN_TOKEN=ci-fake-admin-token
+          SERVICE_TOKEN=ci-fake-service-token
+          SUB_PUBLIC_HOST=sub.localhost
+          ADMIN_PUBLIC_HOST=admin.localhost
+          BOT_TOKEN=111111:ci-fake-bot-token
+          EOF
+
+      # ACME_EMAIL намеренно пуст: именно на этом Caddy падал со «wrong argument count»,
+      # а падение Caddy = разом недоступны выдача подписки, вебхуки оплат и админка.
+      - name: Caddyfile валиден при пустом ACME_EMAIL
+        run: |
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e SUB_DOMAIN=sub.localhost -e ADMIN_DOMAIN=admin.localhost -e ACME_EMAIL= \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
+      - name: Вход агентов проксируется
+        run: |
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e SUB_DOMAIN=sub.localhost -e ADMIN_DOMAIN=admin.localhost \
+            caddy:2-alpine caddy adapt --config /etc/caddy/Caddyfile > adapted.json
+          grep -q '/internal/agent/\*' adapted.json \
+            || { echo "в Caddyfile нет маршрута /internal/agent/* — ноды не смогут подключиться"; exit 1; }
+
+      - name: Сборка образов
+        run: docker compose -f docker-compose.prod.yml build
+
+      - name: БД
+        run: |
+          docker compose -f docker-compose.prod.yml up -d postgres redis
+          timeout 90 sh -c 'until docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U vpn -d vpn_platform; do sleep 2; done'
+
+      # Тот же образ и та же команда, что в docs/deploy.md
+      - name: Миграции из боевого образа
+        run: docker compose -f docker-compose.prod.yml run --rm migrate
+
+      - name: Стенд
+        run: docker compose -f docker-compose.prod.yml up -d core worker admin-build caddy
+
+      - name: Смоук через Caddy
+        run: |
+          timeout 90 sh -c 'until curl -sk --resolve sub.localhost:443:127.0.0.1 https://sub.localhost/healthz | grep -q "\"ok\":true"; do sleep 3; done'
+
+          # Ручка агентов должна отвечать 401 (нет токена), а не 404: 404 означал бы,
+          # что запрос до core не доходит.
+          code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST \
+            --resolve sub.localhost:443:127.0.0.1 https://sub.localhost/internal/agent/enroll \
+            -H 'content-type: application/json' -d '{}')
+          echo "/internal/agent/enroll → $code"
+          [ "$code" = "404" ] && { echo "агенты не достучатся до core"; exit 1; }
+
+          # Админский API не должен быть виден на домене подписки
+          code=$(curl -sk -o /dev/null -w '%{http_code}' \
+            --resolve sub.localhost:443:127.0.0.1 https://sub.localhost/api/admin/merchants)
+          echo "админка на домене подписки → $code"
+          [ "$code" = "404" ] || { echo "админский API торчит на домене подписки"; exit 1; }
+
+          # А на своём домене — отвечает и требует токен
+          code=$(curl -sk -o /dev/null -w '%{http_code}' \
+            --resolve admin.localhost:443:127.0.0.1 https://admin.localhost/api/admin/merchants)
+          echo "админка на своём домене → $code"
+          [ "$code" = "401" ] || { echo "ожидался 401 без токена"; exit 1; }
+
+      - name: Логи при падении
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail=80
+
+      - name: Убрать стенд
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v

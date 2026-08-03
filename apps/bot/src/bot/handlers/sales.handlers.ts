@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { buildIdempotencyKey } from "@vpn/core-kit";
+import { buildIdempotencyKey } from "@corelink/core-kit";
 import type { CreatedPaymentDto, PlanDto } from "../../core-api/core-api.client.js";
 import { formatMoney, messages } from "../messages.js";
 import { backKeyboard, pickByShort, resolveSubscriberId, shortId, showScreen, type HandlerDeps } from "../ui.js";

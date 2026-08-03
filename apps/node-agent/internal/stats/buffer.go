@@ -14,12 +14,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+)
+
+// Потолок буфера. Панель может лежать сутками, а места на ноде немного; снапшот
+// к тому же переписывается ЦЕЛИКОМ каждый цикл, поэтому дорог не только объём, но
+// и скорость его роста: без потолка буфер заполняет диск и делает каждый цикл
+// дороже предыдущего.
+//
+// При переполнении выбрасываются САМЫЕ СТАРЫЕ записи: свежий трафик ценнее давнего,
+// и очередь остаётся FIFO. Дропать свежие означало бы вечно упираться в ту же голову.
+//
+// Порядок величин: ~500 записей при 30-секундном цикле — это около 4 часов
+// недоступности control-plane, файл при этом порядка нескольких мегабайт.
+const (
+	MaxPendingEntries  = 500
+	MaxPendingCounters = 50_000
 )
 
 // Counter is a single named traffic counter (e.g.
@@ -64,22 +80,29 @@ type Buffer struct {
 	mu         sync.Mutex
 	path       string
 	agentEpoch string
+	log        *slog.Logger
 	seq        uint64
 	pending    []Entry
 }
 
 // New opens (or creates) the buffer at path and recovers any unshipped entries.
-func New(path, agentEpoch string) (*Buffer, error) {
+func New(path, agentEpoch string, log *slog.Logger) (*Buffer, error) {
 	if agentEpoch == "" {
 		return nil, errors.New("stats: agent_epoch is required for report_id uniqueness")
+	}
+	if log == nil {
+		log = slog.Default()
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("stats: create dir: %w", err)
 	}
-	b := &Buffer{path: path, agentEpoch: agentEpoch}
+	b := &Buffer{path: path, agentEpoch: agentEpoch, log: log}
 	if err := b.recover(); err != nil {
 		return nil, err
 	}
+	// Восстановленный буфер тоже подрезаем: потолок мог появиться (или снизиться)
+	// уже после того, как файл разросся. Блокировка не нужна — буфер ещё ничей.
+	b.trimLocked()
 	return b, nil
 }
 
@@ -100,13 +123,43 @@ func (b *Buffer) Append(windowStart time.Time, counters []Counter) (Entry, error
 		CollectedAt: time.Now().UTC(),
 		Counters:    counters,
 	}
+	before := b.pending
 	b.pending = append(b.pending, e)
+	b.trimLocked()
 	if err := b.persistLocked(); err != nil {
-		b.pending = b.pending[:len(b.pending)-1]
+		// Откат ровно в то состояние, что было до вызова: подрезка могла выбросить
+		// старые записи, а на диск ничего не легло — иначе память и файл разошлись бы.
+		b.pending = before
 		b.seq--
 		return Entry{}, fmt.Errorf("stats: persist entry: %w", err)
 	}
 	return e, nil
+}
+
+// trimLocked enforces the buffer ceiling by dropping the OLDEST entries.
+// Caller must hold b.mu.
+func (b *Buffer) trimLocked() {
+	dropped, droppedCounters := 0, 0
+	counters := 0
+	for _, e := range b.pending {
+		counters += len(e.Counters)
+	}
+
+	for len(b.pending) > MaxPendingEntries || (counters > MaxPendingCounters && len(b.pending) > 1) {
+		counters -= len(b.pending[0].Counters)
+		droppedCounters += len(b.pending[0].Counters)
+		dropped++
+		b.pending = b.pending[1:]
+	}
+	if dropped == 0 {
+		return
+	}
+	// Прямая недостача в учёте трафика, а не рабочий режим: если это видно в логах
+	// регулярно — control-plane недоступен слишком долго либо потолок мал для ноды.
+	b.log.Error("stats: buffer overflow, oldest entries dropped",
+		"dropped_entries", dropped,
+		"dropped_counters", droppedCounters,
+		"kept_entries", len(b.pending))
 }
 
 // Pending returns a copy of the currently unshipped entries.

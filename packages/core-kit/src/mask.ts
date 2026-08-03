@@ -1,5 +1,6 @@
 const SECRET_HEADERS = new Set([
   "authorization",
+  "x-api-key",
   "crypto-pay-api-token",
   "merchant_api_key",
   "x-signature",

@@ -1,6 +1,18 @@
-import { Body, Controller, Get, Headers, Logger, NotFoundException, Param, Post, Req, Res } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Logger,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  Res,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import type { Request, Response } from "express";
-import { PROVIDER_SPECS, STARS_INTERNAL_CONFIRM_HEADER } from "@vpn/payments";
+import { PROVIDER_SPECS, STARS_INTERNAL_CONFIRM_HEADER } from "@corelink/payments";
 import { PaymentService } from "./payment.service.js";
 import { MerchantService } from "./merchant.service.js";
 import { IdempotencyService } from "../common/idempotency.service.js";
@@ -25,7 +37,8 @@ export class PaymentsController {
    *
    * Коды ответа:
    *   401 — невалидная подпись, до всякой обработки;
-   *   503 — мерчантов провайдера нет, обработать нечем: просим провайдера повторить;
+   *   503 — обработка не начиналась: мерчантов провайдера нет либо их креды не читаются.
+   *         Просим провайдера повторить — после починки конфига платёж дойдёт;
    *   200 — всё остальное, включая внутренние ошибки: ретраи по ним только вредят.
    */
   @Post("webhooks/:provider")
@@ -61,12 +74,13 @@ export class PaymentsController {
       }
       res.status(200).send({ ok: true });
     } catch (err) {
-      // «Нет включённых мерчантов провайдера» — это не сбой обработки, а то, что
-      // обработка не начиналась: мерчанта выключили или ещё не настроили. Ответить
-      // 200 здесь значит сказать провайдеру «платёж принят» и потерять его молча.
-      // Отдаём 503, чтобы провайдер повторил и платёж дожил до починки конфига.
-      if (err instanceof NotFoundException) {
-        this.log.error(`webhook ${provider}: нет включённых мерчантов, платёж не обработан — просим повтор`);
+      // Обработка не начиналась: мерчанта выключили, ещё не настроили (NotFound) или
+      // его креды не расшифровываются (ServiceUnavailable — например, сменили
+      // SECRETS_MASTER_KEY). Ответить 200 здесь значит сказать провайдеру «платёж принят»
+      // и потерять его молча. Отдаём 503, чтобы провайдер повторил и платёж дожил до
+      // починки конфига.
+      if (err instanceof NotFoundException || err instanceof ServiceUnavailableException) {
+        this.log.error(`webhook ${provider}: платёж не обработан (${err.message}) — просим повтор`);
         res.status(503).send({ ok: false });
         return;
       }

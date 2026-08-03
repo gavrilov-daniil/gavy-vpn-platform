@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { LedgerService } from "../payments/ledger.service.js";
@@ -141,6 +141,12 @@ export class SubscribersService {
     });
   }
 
+  /**
+   * Вторая подписка у клиента законна (unique-индекса на subscriber_id нет), поэтому
+   * порядок обязателен: без него Postgres отдавал бы произвольную строку и бот
+   * показывал бы то одну ссылку, то другую. Берём самую раннюю — тем же порядком
+   * продлевает оплату applyPlan, иначе деньги ушли бы не в ту подписку.
+   */
   private async findSubscription(db: Selectable, subscriberId: string) {
     const [row] = await db
       .select()
@@ -151,6 +157,7 @@ export class SubscribersService {
           eq(schema.subscription.subscriberId, subscriberId),
         ),
       )
+      .orderBy(asc(schema.subscription.createdAt), asc(schema.subscription.id))
       .limit(1);
     return row ?? null;
   }

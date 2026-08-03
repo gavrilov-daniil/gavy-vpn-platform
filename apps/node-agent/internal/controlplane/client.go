@@ -115,6 +115,39 @@ type EnrollResponse struct {
 	AgentEpoch int64  `json:"agentEpoch"`
 }
 
+// HTTPError is a non-2xx answer from the control plane. The status is part of the
+// error on purpose: for buffered data (stats) the caller must tell "will never be
+// accepted" apart from "try again later".
+type HTTPError struct {
+	Method string
+	Path   string
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("controlplane: %s %s: status %d: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+// Permanent reports whether re-sending the very same request could ever succeed.
+//
+// Не «любой 4xx». 401/403 — сорванная аутентификация: её чинит перевыпуск токена,
+// а выброшенная статистика не восстанавливается ничем. 404 — нода, которую ещё не
+// завели в панели. 408/429 — прямая просьба повторить позже. Постоянным считаем
+// только отказ, относящийся к САМОМУ ТЕЛУ запроса: с ним повтор бессмыслен, а
+// застрявший в очереди батч останавливает учёт трафика по ноде насовсем.
+func (e *HTTPError) Permanent() bool {
+	switch e.Status {
+	case http.StatusBadRequest,
+		http.StatusRequestEntityTooLarge,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity:
+		return true
+	default:
+		return false
+	}
+}
+
 type Client struct {
 	baseURL string
 	nodeID  string
@@ -424,9 +457,23 @@ func (c *Client) doAuth(ctx context.Context, method, path string, body []byte, t
 		return nil, fmt.Errorf("controlplane: read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("controlplane: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, &HTTPError{
+			Method: method,
+			Path:   path,
+			Status: resp.StatusCode,
+			Body:   truncate(strings.TrimSpace(string(respBody)), 512),
+		}
 	}
 	return respBody, nil
+}
+
+// truncate keeps an error message loggable: a control-plane 413 answers with an
+// HTML page, and the whole page in every log line is noise.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {

@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
-import { decryptCredentials, encryptCredentials, maskCredentialsForDisplay } from "@vpn/core-kit";
-import { getAdapter, isAllowedProviderApiUrl, type MerchantConfig } from "@vpn/payments";
+import { schema, type Database } from "@corelink/db";
+import { decryptCredentials, encryptCredentials, maskCredentialsForDisplay } from "@corelink/core-kit";
+import { getAdapter, isAllowedProviderApiUrl, type MerchantConfig } from "@corelink/payments";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 
@@ -162,8 +162,25 @@ export class MerchantService {
     return result;
   }
 
+  /**
+   * Нерасшифровываемые креды — это «не настроен», а не сбой запроса.
+   *
+   * `toConfig` расшифровывает креды и падает при сменённом `SECRETS_MASTER_KEY` или битой
+   * строке в БД. Без этого перехвата один такой мерчант ронял 500 и список целиком: экран
+   * мерчантов умирал ровно в тот момент, когда через него нужно заново ввести ключи, а
+   * `listAvailable` перестал бы отдавать боту ЛЮБОЙ способ оплаты, хотя остальные исправны.
+   * Сценарий штатный — ротация ключа или дамп, восстановленный со старым (`.env.example`).
+   */
   isConfigured(row: typeof schema.paymentMerchant.$inferSelect): boolean {
-    return getAdapter(row.provider).isConfigured(this.toConfig(row));
+    try {
+      return getAdapter(row.provider).isConfigured(this.toConfig(row));
+    } catch (err) {
+      this.log.error(
+        `merchant ${row.alias} (${row.provider}): креды не читаются — ${err instanceof Error ? err.message : String(err)}. ` +
+          `Проверьте SECRETS_MASTER_KEY; до этого мерчант считается ненастроенным`,
+      );
+      return false;
+    }
   }
 
   /**

@@ -26,6 +26,42 @@ interface MemoryEntry {
 }
 
 /**
+ * Проверка и отметка одним шагом на стороне Redis.
+ *
+ * Раздельные multi() на чтение и на запись давали окно, в котором N параллельных
+ * запросов читали count=0 до первого zadd и проходили ВСЕ. На логине окно ещё и
+ * растянуто scrypt'ом (~50–100 мс), так что «5 попыток за 900 с» превращалось в
+ * «сколько влезет в конкурентность». Скрипт исполняется атомарно, промежуточного
+ * состояния между zcard и zadd не существует.
+ *
+ * Отметка ставится ТОЛЬКО за разрешённый запрос: иначе клиент, долбящийся в 429,
+ * продлевает себе блокировку и не выбирается из неё, пока не замолчит целиком.
+ */
+const SLIDING_WINDOW_LUA = `
+local now = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, now - window)
+local count = redis.call('ZCARD', KEYS[1])
+if count >= limit then
+  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  local resetIn = window
+  if oldest[2] then resetIn = tonumber(oldest[2]) + window - now end
+  return {0, resetIn}
+end
+
+redis.call('ZADD', KEYS[1], now, ARGV[4])
+redis.call('PEXPIRE', KEYS[1], window)
+return {1, 0}
+`;
+
+/** ioredis-клиент с зарегистрированным скриптом окна (defineCommand типов не добавляет). */
+type LimiterRedis = Redis & {
+  slidingWindow(key: string, now: number, windowMs: number, limit: number, member: string): Promise<[number, number]>;
+};
+
+/**
  * Скользящее окно (лог отметок) для публичных эндпоинтов.
  *
  * Хранилище: Redis при заданном REDIS_URL, иначе память процесса — core обязан
@@ -38,7 +74,7 @@ interface MemoryEntry {
 @Injectable()
 export class RateLimitService implements OnModuleDestroy {
   private readonly log = new Logger(RateLimitService.name);
-  private readonly redis: Redis | null;
+  private readonly redis: LimiterRedis | null;
   private readonly memory = new Map<string, MemoryEntry>();
   private redisErrorLogged = false;
 
@@ -60,14 +96,16 @@ export class RateLimitService implements OnModuleDestroy {
     }
   }
 
-  private connect(url: string): Redis {
+  private connect(url: string): LimiterRedis {
     // enableOfflineQueue:false + commandTimeout: команда к лежащему Redis отваливается сразу,
     // а не держит выдачу подписки; отказ уходит в fail-open внутри check().
     const redis = new Redis(url, {
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
       commandTimeout: 500,
-    });
+    }) as LimiterRedis;
+    // defineCommand шлёт EVALSHA и сам подгружает скрипт на NOSCRIPT — тело не летит на каждый запрос
+    redis.defineCommand("slidingWindow", { numberOfKeys: 1, lua: SLIDING_WINDOW_LUA });
     redis.on("error", (err) => {
       if (this.redisErrorLogged) return;
       this.redisErrorLogged = true;
@@ -80,37 +118,20 @@ export class RateLimitService implements OnModuleDestroy {
   }
 
   private async checkRedis(key: string, rule: RateLimitRule): Promise<RateLimitDecision> {
-    const redis = this.redis!;
     const now = Date.now();
     const windowMs = rule.windowSec * 1000;
-    const k = `rl:${key}`;
+    const member = `${now}-${randomBytes(4).toString("hex")}`;
 
-    const read = await redis
-      .multi()
-      .zremrangebyscore(k, 0, now - windowMs)
-      .zcard(k)
-      .zrange(k, 0, 0, "WITHSCORES")
-      .exec();
-    if (!read) throw new Error("redis multi вернул null");
-    for (const [err] of read) if (err) throw err;
-
-    const count = Number(read[1]?.[1] ?? 0);
-    if (count >= rule.limit) {
-      const oldest = Number((read[2]?.[1] as string[] | undefined)?.[1] ?? now);
-      return { allowed: false, retryAfterSec: secondsUntil(oldest + windowMs - now) };
-    }
-
-    // Отметку ставим ТОЛЬКО за разрешённый запрос. Иначе клиент, долбящийся в 429,
-    // продлевает себе блокировку и не выбирается из неё, пока не замолчит целиком.
-    const write = await redis
-      .multi()
-      .zadd(k, now, `${now}-${randomBytes(4).toString("hex")}`)
-      .pexpire(k, windowMs)
-      .exec();
-    if (write) for (const [err] of write) if (err) throw err;
-    return ALLOWED;
+    const [allowed, resetInMs] = await this.redis!.slidingWindow(`rl:${key}`, now, windowMs, rule.limit, member);
+    if (allowed === 1) return ALLOWED;
+    return { allowed: false, retryAfterSec: secondsUntil(resetInMs) };
   }
 
+  /**
+   * Память процесса: чтение и запись лежат в одном синхронном участке, между ними
+   * нет ни одного await — на однопоточном рантайме этого достаточно, параллельный
+   * запрос не может вклиниться. Убирать синхронность нельзя, это и есть атомарность.
+   */
   private checkMemory(key: string, rule: RateLimitRule): RateLimitDecision {
     const now = Date.now();
     const windowMs = rule.windowSec * 1000;

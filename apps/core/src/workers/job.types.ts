@@ -8,6 +8,7 @@ export const JOB_NAMES = [
   "broadcast-resume",
   "payment-reconcile",
   "abuse-scan",
+  "ai-suggest",
   "maintenance",
 ] as const;
 

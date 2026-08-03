@@ -11,8 +11,8 @@
  */
 import { createHmac, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { createDb, schema, type Database } from "@vpn/db";
-import { encryptCredentials } from "@vpn/core-kit";
+import { createDb, schema, type Database } from "@corelink/db";
+import { encryptCredentials } from "@corelink/core-kit";
 
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "postgres://vpn:vpn@localhost:5442/vpn_platform";
@@ -375,6 +375,16 @@ export async function cleanupOrg(db: Database): Promise<void> {
     sql`delete from routing_domain_list where org_id = ${org}`,
     sql`delete from subscription where org_id = ${org}`,
     sql`delete from subscriber where org_id = ${org}`,
+    // трафик тоже ссылается на ноду: без этих трёх строк удаление ноды падает по FK
+    // у любого теста, который дошёл до приёма статистики или сам положил агрегат
+    sql`delete from traffic_daily where org_id = ${org}`,
+    sql`delete from traffic_sample where org_id = ${org}`,
+    sql`delete from traffic_report where org_id = ${org}`,
+    // состояние ноды 1:1 и без ON DELETE CASCADE — без этих трёх строк удаление
+    // ноды падает по FK у любого теста, который дошёл до сборки desired-state
+    sql`delete from node_identity where node_id in (select id from node where org_id = ${org})`,
+    sql`delete from node_desired_state where node_id in (select id from node where org_id = ${org})`,
+    sql`delete from node_reported_state where node_id in (select id from node where org_id = ${org})`,
     sql`delete from node where org_id = ${org}`,
     sql`delete from config_profile where org_id = ${org}`,
     sql`delete from server where org_id = ${org}`,

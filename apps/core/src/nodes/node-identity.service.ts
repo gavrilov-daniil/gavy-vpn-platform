@@ -1,8 +1,8 @@
 import { Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
-import { safeCompare } from "@vpn/core-kit";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { schema, type Database } from "@corelink/db";
+import { safeCompare } from "@corelink/core-kit";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { NodeStateService } from "./node-state.service.js";
@@ -201,6 +201,24 @@ export class NodeIdentityService {
    * Публичная часть Reality приезжает с ноды: приватник её никогда не покидает,
    * поэтому до энроллмента панель не знает ни pbk, ни shortIds и не может собрать
    * клиентский конфиг.
+   *
+   * Пишем в ДВА места, и это не дублирование данных, а разные потребители:
+   *   - `inbound` — конфиг САМОЙ ноды (desired-state) и каскадное плечо relay→exit;
+   *   - `host` — клиентский конфиг подписки: генератор читает `pbk`/`sid` именно
+   *     оттуда (`subscription.repository.hostRef`). Без записи в host нода с
+   *     `reality_keypair_mode=generate` поднимала бы Reality с новым приватником,
+   *     панель показывала бы её зелёной, а хендшейк падал бы у всех её клиентов
+   *     и у каскада через неё.
+   *
+   * Почему не наоборот — не собирать клиентский конфиг из inbound: приватник живёт
+   * на ноде, а config_profile может быть общим у нескольких нод, и у каждой из них
+   * свой сгенерированный ключ. В одну строку inbound они не помещаются, поэтому
+   * pbk, взятый из inbound, был бы верным в лучшем случае для одной ноды из profile.
+   * У host есть node_id — это единственное место, где ключ привязан к той ноде,
+   * которая его реально обслуживает.
+   *
+   * Обе записи — одной транзакцией: конфиг ноды и конфиг клиентов обязаны говорить
+   * об одном и том же ключе, половина применённого обновления = мёртвый канал.
    */
   private async applyRealityIdentity(nodeId: string, input: EnrollInput) {
     if (!input.realityPublicKey) return;
@@ -211,20 +229,50 @@ export class NodeIdentityService {
       .limit(1);
     if (!node) return;
 
+    const pbk = input.realityPublicKey;
     const shortIds = (input.shortIds ?? []).filter((s) => typeof s === "string" && s.length > 0);
-    await this.db
-      .update(schema.inbound)
-      .set({
-        realityPublicKey: input.realityPublicKey,
-        // пустой список с ноды не затирает уже настроенные shortIds
-        ...(shortIds.length > 0 ? { shortIds } : {}),
-      })
-      .where(
-        and(
-          eq(schema.inbound.configProfileId, node.configProfileId),
-          eq(schema.inbound.security, "reality"),
-        ),
-      );
+
+    await this.db.transaction(async (tx) => {
+      const inbounds = await tx
+        .update(schema.inbound)
+        .set({
+          realityPublicKey: pbk,
+          // пустой список с ноды не затирает уже настроенные shortIds
+          ...(shortIds.length > 0 ? { shortIds } : {}),
+        })
+        .where(
+          and(
+            eq(schema.inbound.configProfileId, node.configProfileId),
+            eq(schema.inbound.security, "reality"),
+          ),
+        )
+        .returning({ id: schema.inbound.id });
+      if (inbounds.length === 0) return;
+
+      // Только host'ы ЭТОЙ ноды: config_profile бывает общим, и без node_id
+      // энроллмент одной ноды переписал бы pbk у чужих host'ов того же профиля.
+      await tx
+        .update(schema.host)
+        .set({
+          pbk,
+          // sid у host'а один из набора инбаунда; пока он в наборе — не трогаем,
+          // иначе энроллмент менял бы вручную выбранный shortId без причины
+          ...(shortIds.length > 0
+            ? {
+                sid: sql`case when ${inArray(schema.host.sid, shortIds)} then ${schema.host.sid} else ${shortIds[0]} end`,
+              }
+            : {}),
+        })
+        .where(
+          and(
+            eq(schema.host.nodeId, nodeId),
+            inArray(
+              schema.host.inboundId,
+              inbounds.map((i) => i.id),
+            ),
+          ),
+        );
+    });
   }
 
   private async requireNode(nodeId: string) {

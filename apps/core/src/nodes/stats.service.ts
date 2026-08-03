@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { and, eq, gte, sql } from "drizzle-orm";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 
@@ -133,6 +133,142 @@ export class StatsService {
     }
   }
 
+  /**
+   * Сводные разрезы для админки.
+   *
+   * Про устройства важное ограничение, из-за которого разрез «трафик по устройству»
+   * тут отсутствует и не появится: Xray считает трафик по email пользователя, а email —
+   * это `short_uuid` подписки. Все устройства одного клиента ходят под одним `vless_uuid`,
+   * поэтому байты между ними неразделимы в принципе. Выдать каждому устройству свой uuid
+   * нельзя: идентичность обязана переноситься с панели дословно (docs/migration.md, P0-3).
+   * Поэтому по устройствам и платформам отдаём СОСТАВ парка, а байты — по пользователю и ноде.
+   */
+  async overview(days = 30) {
+    const since = dayKey(days);
+
+    const [totals, byDay, byNode, platforms, devices] = await Promise.all([
+      this.db
+        .select({
+          up: sql<number>`coalesce(sum(${schema.trafficDaily.up}), 0)::bigint`,
+          down: sql<number>`coalesce(sum(${schema.trafficDaily.down}), 0)::bigint`,
+          subscribers: sql<number>`count(distinct ${schema.trafficDaily.subjectKey})::int`,
+        })
+        .from(schema.trafficDaily)
+        .where(this.userScope(since)),
+
+      this.db
+        .select({
+          day: schema.trafficDaily.day,
+          up: sql<number>`sum(${schema.trafficDaily.up})::bigint`,
+          down: sql<number>`sum(${schema.trafficDaily.down})::bigint`,
+        })
+        .from(schema.trafficDaily)
+        .where(this.userScope(since))
+        .groupBy(schema.trafficDaily.day)
+        .orderBy(schema.trafficDaily.day),
+
+      this.db
+        .select({
+          nodeId: schema.node.id,
+          nodeName: schema.node.name,
+          country: schema.server.country,
+          up: sql<number>`sum(${schema.trafficDaily.up})::bigint`,
+          down: sql<number>`sum(${schema.trafficDaily.down})::bigint`,
+        })
+        .from(schema.trafficDaily)
+        .innerJoin(schema.node, eq(schema.node.id, schema.trafficDaily.nodeId))
+        .innerJoin(schema.server, eq(schema.server.id, schema.node.serverId))
+        .where(this.userScope(since))
+        .groupBy(schema.node.id, schema.node.name, schema.server.country)
+        .orderBy(sql`sum(${schema.trafficDaily.up} + ${schema.trafficDaily.down}) desc`),
+
+      this.db
+        .select({
+          // null остаётся отдельной категорией: клиент без x-hwid — это не «прочее», а
+          // приложение, которое заголовок не шлёт, и таких надо видеть отдельно
+          os: schema.subscriberDevice.deviceOs,
+          devices: sql<number>`count(*)::int`,
+          subscriptions: sql<number>`count(distinct ${schema.subscriberDevice.subscriptionId})::int`,
+        })
+        .from(schema.subscriberDevice)
+        .where(eq(schema.subscriberDevice.orgId, this.cfg.defaultOrgId))
+        .groupBy(schema.subscriberDevice.deviceOs)
+        .orderBy(sql`count(*) desc`),
+
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(schema.subscriberDevice)
+        .where(eq(schema.subscriberDevice.orgId, this.cfg.defaultOrgId)),
+    ]);
+
+    return {
+      periodDays: days,
+      traffic: { ...(totals[0] ?? { up: 0, down: 0, subscribers: 0 }), byDay, byNode },
+      // Трафик здесь намеренно отсутствует — см. комментарий выше
+      devices: { total: devices[0]?.total ?? 0, byPlatform: platforms },
+    };
+  }
+
+  /** Кто расходует больше всех. subject_key = short_uuid, поэтому подписка находится напрямую. */
+  async topSubscribers(days = 30, limit = 50) {
+    const since = dayKey(days);
+
+    return this.db
+      .select({
+        shortUuid: schema.trafficDaily.subjectKey,
+        subscriptionId: schema.subscription.id,
+        status: schema.subscription.status,
+        telegramId: schema.subscriber.telegramId,
+        up: sql<number>`sum(${schema.trafficDaily.up})::bigint`,
+        down: sql<number>`sum(${schema.trafficDaily.down})::bigint`,
+      })
+      .from(schema.trafficDaily)
+      // left, а не inner: трафик удалённой подписки — это не повод потерять его из сводки
+      .leftJoin(schema.subscription, eq(schema.subscription.shortUuid, schema.trafficDaily.subjectKey))
+      .leftJoin(schema.subscriber, eq(schema.subscriber.id, schema.subscription.subscriberId))
+      .where(this.userScope(since))
+      .groupBy(
+        schema.trafficDaily.subjectKey,
+        schema.subscription.id,
+        schema.subscription.status,
+        schema.subscriber.telegramId,
+      )
+      .orderBy(sql`sum(${schema.trafficDaily.up} + ${schema.trafficDaily.down}) desc`)
+      .limit(Math.min(Math.max(limit, 1), 500));
+  }
+
+  /** Устройства подписки: что именно подключалось и когда последний раз. */
+  async devicesBySubscription(shortUuid: string) {
+    return this.db
+      .select({
+        hwid: schema.subscriberDevice.hwid,
+        deviceOs: schema.subscriberDevice.deviceOs,
+        osVer: schema.subscriberDevice.osVer,
+        deviceModel: schema.subscriberDevice.deviceModel,
+        firstSeenAt: schema.subscriberDevice.firstSeenAt,
+        lastSeenAt: schema.subscriberDevice.lastSeenAt,
+      })
+      .from(schema.subscriberDevice)
+      .innerJoin(schema.subscription, eq(schema.subscription.id, schema.subscriberDevice.subscriptionId))
+      .where(
+        and(
+          eq(schema.subscriberDevice.orgId, this.cfg.defaultOrgId),
+          eq(schema.subscription.shortUuid, shortUuid),
+        ),
+      )
+      .orderBy(sql`${schema.subscriberDevice.lastSeenAt} desc`);
+  }
+
+  private userScope(since: string) {
+    return and(
+      eq(schema.trafficDaily.orgId, this.cfg.defaultOrgId),
+      // только subject_type=user: inbound и outbound считают тот же трафик второй раз,
+      // и суммирование по всем типам завысило бы итог кратно
+      eq(schema.trafficDaily.subjectType, "user"),
+      gte(schema.trafficDaily.day, since),
+    );
+  }
+
   /** Сводка по подписчику: сколько израсходовано и с каких нод. */
   async usageBySubscription(shortUuid: string) {
     const rows = await this.db
@@ -152,4 +288,10 @@ export class StatsService {
       );
     return rows;
   }
+}
+
+/** Нижняя граница периода в формате колонки `day` (YYYY-MM-DD): сравнение идёт по тексту. */
+function dayKey(days: number): string {
+  const from = new Date(Date.now() - Math.max(days, 1) * 86_400_000);
+  return from.toISOString().slice(0, 10);
 }

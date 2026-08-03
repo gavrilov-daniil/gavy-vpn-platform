@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { request } from "@vpn/core-kit";
+import { request } from "@corelink/core-kit";
 import { resolveProviderBaseUrl } from "../provider-urls.js";
 import {
   kopeksToRubles,

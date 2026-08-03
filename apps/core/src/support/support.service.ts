@@ -1,9 +1,11 @@
 import { ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
+import { SuggestionService } from "../ai/suggestion.service.js";
+import { QueueService } from "../workers/queue.service.js";
 
 export interface InboundInput {
   telegramUserId: number;
@@ -29,7 +31,11 @@ export class SupportService {
   private readonly log = new Logger(SupportService.name);
   private readonly cfg = loadConfig();
 
-  constructor(@Inject(DB) private readonly db: Database) {}
+  constructor(
+    @Inject(DB) private readonly db: Database,
+    private readonly queue: QueueService,
+    private readonly suggestions: SuggestionService,
+  ) {}
 
   /**
    * Входящее из Telegram. Три барьера идемпотентности, все на индексах БД:
@@ -83,6 +89,11 @@ export class SupportService {
       .update(schema.conversation)
       .set({ lastMessageAt: new Date(), updatedAt: new Date() })
       .where(eq(schema.conversation.id, conversation.id));
+
+    // Подсказку оператору считает джоба, а не этот хендлер: клиент не должен ждать
+    // модель, а лежащий провайдер не должен мешать принять обращение. Постановка
+    // в очередь ничего не ждёт и ничего не бросает; если Redis лежит — доберёт cron.
+    void this.queue.enqueue("ai-suggest");
 
     return {
       deduped: false as const,
@@ -205,9 +216,12 @@ export class SupportService {
       .where(and(eq(schema.message.orgId, this.cfg.defaultOrgId), eq(schema.message.conversationId, id)))
       .orderBy(asc(schema.message.createdAt));
 
+    const suggestions = await this.suggestions.listForConversation(id);
+
     return {
       ...conversation,
       contact: contact ?? null,
+      suggestions,
       messages: messages.map((m) => ({
         id: m.id,
         direction: m.direction,

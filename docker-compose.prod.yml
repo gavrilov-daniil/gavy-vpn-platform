@@ -2,10 +2,12 @@
 # машине с действующей панелью нельзя — не хватит памяти, и два control-plane не должны
 # делить ноды (см. docs/migration.md, раздел cutover).
 #
-# Запуск:
+# Запуск (порядок важен: миграции до старта приложений, иначе новый код работает
+# против старой схемы):
 #   cp .env.example .env && отредактировать
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml up -d postgres redis
 #   docker compose -f docker-compose.prod.yml run --rm migrate
+#   docker compose -f docker-compose.prod.yml up -d --build
 #
 # Порты наружу торчат только у caddy. postgres и redis слушают внутри сети.
 
@@ -38,19 +40,20 @@ services:
       retries: 10
 
   # Разовая команда: docker compose run --rm migrate
+  # Своей сборки нет намеренно: берём ровно тот образ, что поедет в core, иначе
+  # миграции могут накатиться версией кода, отличной от разворачиваемой.
   migrate:
-    build:
-      context: .
-      dockerfile: apps/core/Dockerfile
+    image: corelink/core:latest
     profiles: ["tools"]
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-vpn}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vpn_platform}
-    command: ["node", "node_modules/.bin/drizzle-kit", "migrate", "--config", "node_modules/@vpn/db/drizzle.config.js"]
+    command: ["node", "node_modules/@corelink/db/dist/migrate.js"]
     depends_on:
       postgres:
         condition: service_healthy
 
   core:
+    image: corelink/core:latest
     build:
       context: .
       dockerfile: apps/core/Dockerfile
@@ -70,10 +73,14 @@ services:
   # Тот же образ, режим worker: cron-эмиттер выбирается advisory-lock'ом,
   # поэтому лишний инстанс расписание не задвоит.
   worker:
-    build:
-      context: .
-      dockerfile: apps/core/Dockerfile
+    image: corelink/core:latest
     restart: unless-stopped
+    # HEALTHCHECK из образа снят намеренно: он стучится в HTTP-порт, а в режиме worker
+    # процесс его не открывает вовсе (apps/core/src/main.ts) — контейнер навсегда
+    # оставался бы unhealthy. Постоянно горящая ложная тревога хуже её отсутствия;
+    # живость воркера видно по прогонам джоб на экране «Джобы» в админке.
+    healthcheck:
+      disable: true
     env_file: .env
     environment:
       INSTANCE_TYPE: worker
@@ -118,7 +125,6 @@ services:
       # подписки. Смена = молчаливый отвал всей базы (docs/migration.md, P0-2).
       SUB_DOMAIN: ${SUB_PUBLIC_HOST:?нужен SUB_PUBLIC_HOST}
       ADMIN_DOMAIN: ${ADMIN_PUBLIC_HOST:?нужен ADMIN_PUBLIC_HOST}
-      ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - admin-dist:/srv/admin:ro

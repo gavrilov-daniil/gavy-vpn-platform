@@ -85,6 +85,27 @@
       "when": 1785040060000,
       "tag": "0011_node_identity_bootstrap_ttl",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785040070000,
+      "tag": "0012_node_config_profile_uq",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785040080000,
+      "tag": "0013_ai_support",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785040090000,
+      "tag": "0014_import_natural_keys",
+      "breakpoints": true
     }
   ]
 }

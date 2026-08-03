@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, asc, desc, eq, gte } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
-import type { ChannelInput, DomainList, FrontOutbound, GeneratorInput, ProfileInput } from "@vpn/xray-config";
+import { schema, type Database } from "@corelink/db";
+import type { ChannelInput, DomainList, FrontOutbound, GeneratorInput, ProfileInput } from "@corelink/xray-config";
 import { DB } from "../db/db.module.js";
 
 export interface SubscriptionBundle {

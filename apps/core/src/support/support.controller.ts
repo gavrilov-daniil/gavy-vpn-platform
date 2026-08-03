@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { BotClient } from "../bot/bot.client.js";
+import { SuggestionService } from "../ai/suggestion.service.js";
 import { CONVERSATION_STATUSES, SupportService, type ConversationStatus } from "./support.service.js";
 
 @Controller()
@@ -7,6 +8,7 @@ export class SupportController {
   constructor(
     private readonly support: SupportService,
     private readonly bot: BotClient,
+    private readonly suggestions: SuggestionService,
   ) {}
 
   /** Приём сообщения от бота. Дедуп по telegram_update_id — бот может переслать апдейт повторно. */
@@ -38,9 +40,17 @@ export class SupportController {
     return this.support.getConversation(id);
   }
 
-  /** Ответ оператора: пишем сообщение, отдаём его боту, фиксируем результат доставки. */
+  /**
+   * Ответ оператора: пишем сообщение, отдаём его боту, фиксируем результат доставки.
+   * `suggestionId` — след того, что текст пришёл из подсказки ИИ. Отправляет по-прежнему
+   * оператор и по этому же пути; подсказка получает статус sent только после доставки,
+   * иначе «отправлено» стояло бы у текста, которого клиент не видел.
+   */
   @Post("api/admin/support/conversations/:id/reply")
-  async reply(@Param("id") id: string, @Body() body: { text: string; operatorUserId?: string }) {
+  async reply(
+    @Param("id") id: string,
+    @Body() body: { text: string; operatorUserId?: string; suggestionId?: string },
+  ) {
     if (!body.text?.trim()) throw new BadRequestException("пустой текст ответа");
 
     const message = await this.support.replyFromOperator({
@@ -53,6 +63,7 @@ export class SupportController {
     const sent = await this.bot.notify({ telegramId: message.telegramUserId, text: message.text });
     if (sent.ok) {
       await this.support.markDelivered(message.messageId, sent.messageId);
+      if (body.suggestionId) await this.suggestions.markSent(body.suggestionId);
       return { messageId: message.messageId, deduped: false, delivered: true };
     }
 

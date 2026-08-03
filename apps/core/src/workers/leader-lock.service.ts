@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
-import type { Database } from "@vpn/db";
+import type { Database } from "@corelink/db";
 import { DB } from "../db/db.module.js";
 
 /** Произвольная константа, общая на весь кластер. Одна на роль cron-эмиттера. */

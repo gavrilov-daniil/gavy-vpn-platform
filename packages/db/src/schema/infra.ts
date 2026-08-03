@@ -21,14 +21,20 @@ export const server = pgTable("server", {
   createdAt: createdAt(),
 }, (t) => [uniqueIndex("server_org_hostname_uq").on(t.orgId, t.hostname)]);
 
-// NODE-side Xray-скелет (routing/dns/policy/api/stats). В текущем парке 1 профиль = 1 нода.
+// NODE-side Xray-скелет (routing/dns/policy/api/stats). 1 профиль = 1 нода (см. node_config_profile_uq).
 export const configProfile = pgTable("config_profile", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: orgId(),
   name: text("name").notNull(),
   baseJson: jsonb("base_json").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: createdAt(),
-});
+}, (t) => [
+  // Имя — натуральный ключ профиля: по нему импортёр находит уже заведённый профиль
+  // при повторном прогоне. Без индекса второй прогон завёл бы профиль-двойник, а с ним
+  // и вторую ноду (профиль занят → node_config_profile_uq пропускает), то есть удвоил
+  // бы парк молча.
+  uniqueIndex("config_profile_org_name_uq").on(t.orgId, t.name),
+]);
 
 // Шейп inbound'а + Reality-идентичность НА inbound'е (без отдельного node_inbound — YAGNI).
 // privateKey Reality в БД НЕТ никогда (только на ноде); тут только public_key/short_ids.
@@ -66,7 +72,14 @@ export const node = pgTable("node", {
   desiredConfigVersion: integer("desired_config_version").notNull().default(0),
   observedConfigHash: text("observed_config_hash"),
   createdAt: createdAt(),
-});
+}, (t) => [
+  // Reality-идентичность живёт на inbound'е, а inbound принадлежит профилю: вторая нода
+  // того же профиля затирает своим энроллментом public_key/short_ids первой, и каскадное
+  // плечо relay→exit (оно читает Reality именно из inbound) начинает указывать на чужой ключ.
+  // Отдельная таблица node_inbound была бы абстракцией под связь, которая фактически 1:1;
+  // индекс делает инвариант проверяемым, а не декларативным.
+  uniqueIndex("node_config_profile_uq").on(t.configProfileId),
+]);
 
 // Endpoint в подписке. Несколько host'ов на inbound = второй IP той же Reality-личности.
 export const host = pgTable("host", {
@@ -88,7 +101,12 @@ export const host = pgTable("host", {
   isDisabled: boolean("is_disabled").notNull().default(false),
   sortOrder: integer("sort_order").notNull().default(0),
   advanced: jsonb("advanced").$type<Record<string, unknown>>().notNull().default({}),
-});
+}, (t) => [
+  // Endpoint — это «куда клиент стучится за этой Reality-личностью», то есть пара
+  // адрес:порт на конкретном inbound'е. Два таких host'а не значат ничего нового,
+  // но в подписке дают два одинаковых канала, а импортёру — по строке на прогон.
+  uniqueIndex("host_inbound_address_port_uq").on(t.inboundId, t.address, t.port),
+]);
 
 // Internal squad = access-control (какие inbound'ы даёт).
 export const squad = pgTable("squad", {

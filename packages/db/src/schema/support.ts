@@ -57,6 +57,28 @@ export const message = pgTable("message", {
   index("message_conversation_idx").on(t.conversationId, t.createdAt),
 ]);
 
+/**
+ * Подключённый провайдер ИИ. Управляется ЧЕРЕЗ АДМИНКУ, как payment_merchant:
+ * ключ шифруется при записи, тумблер включает провайдера без рестарта.
+ * В env ключи не кладём — иначе смена ключа означает выкатку.
+ */
+export const aiProvider = pgTable("ai_provider", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: orgId(),
+  provider: text("provider").notNull(), // anthropic | openai_compatible
+  alias: text("alias").notNull(),
+  isEnabled: boolean("is_enabled").notNull().default(false),
+  model: text("model").notNull(),
+  credentials: jsonb("credentials").$type<Record<string, string>>().notNull().default({}),
+  // Лимиты расхода и длины контекста живут здесь: их правит оператор, а не деплой.
+  settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+  lastCheckAt: timestamp("last_check_at", { withTimezone: true }),
+  lastCheckOk: boolean("last_check_ok"),
+  lastCheckError: text("last_check_error"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [uniqueIndex("ai_provider_org_alias_uq").on(t.orgId, t.alias)]);
+
 // База знаний для ИИ-ответов. Векторный поиск — позже (pgvector не в MVP, 1GB RAM).
 export const kbDocument = pgTable("kb_document", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -80,4 +102,7 @@ export const aiSuggestion = pgTable("ai_suggestion", {
   status: text("status").notNull().default("proposed"), // proposed | accepted | edited | rejected | sent
   idempotencyKey: text("idempotency_key").notNull(),
   createdAt: createdAt(),
-}, (t) => [uniqueIndex("ai_suggestion_idempotency_uq").on(t.idempotencyKey)]);
+}, (t) => [
+  uniqueIndex("ai_suggestion_idempotency_uq").on(t.idempotencyKey),
+  index("ai_suggestion_conversation_idx").on(t.orgId, t.conversationId, t.createdAt),
+]);

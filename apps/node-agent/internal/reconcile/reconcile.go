@@ -143,6 +143,13 @@ func (r *Reconciler) apply(ctx context.Context, ds *controlplane.DesiredState) e
 	return nil
 }
 
+// maxCountersPerEntry — потолок одной записи буфера, он же потолок одного тела
+// POST /stats. На ноде с тысячей активных юзеров цикл даёт тысячи счётчиков, и
+// одним куском они не влезали в лимит тела control-plane: батч получал 413 и
+// вставал колом в голове очереди — учёт трафика по ноде замирал НАСОВСЕМ.
+// 2000 счётчиков — это порядка 1000 дельт на проводе, сотни килобайт JSON.
+const maxCountersPerEntry = 2000
+
 // collectStats снимает дельту счётчиков с Xray и кладёт её в durable-буфер.
 //
 // Порядок здесь — не стилистика. QueryStats(reset=true) уже обнулил счётчики,
@@ -171,18 +178,33 @@ func (r *Reconciler) collectStats(ctx context.Context) error {
 		return nil
 	}
 
-	entry, err := r.stats.Append(windowStart, counters)
-	if err != nil {
-		// Счётчики в Xray уже обнулены, а на диск дельта не легла — эти байты
-		// потеряны. Громко, потому что это прямая недостача в учёте трафика.
-		r.log.Error("reconcile: stats delta lost, buffer write failed", "counters", len(counters), "err", err)
-		return err
+	// Резать надо ЗДЕСЬ, а не при отправке. report_id выдаётся записи буфера, и он же
+	// ключ дедупа на control-plane: разрезанный при отправке батч уехал бы несколькими
+	// телами с ОДНИМ report_id, и все части кроме первой были бы отброшены как повтор.
+	appended := 0
+	for len(counters) > 0 {
+		size := min(len(counters), maxCountersPerEntry)
+		entry, err := r.stats.Append(windowStart, counters[:size])
+		if err != nil {
+			// Счётчики в Xray уже обнулены, а на диск дельта не легла — эти байты
+			// потеряны. Громко, потому что это прямая недостача в учёте трафика.
+			r.log.Error("reconcile: stats delta lost, buffer write failed", "counters", size, "err", err)
+			// Часть кусков уже легла с этим window_start. Оставить окно открытым значит
+			// отдать следующей дельте тот же window_start — и она вся упрётся в дедуп
+			// control-plane по (node, subject, window_start), то есть потеряется целиком.
+			if appended > 0 {
+				r.lastStatsRead = readAt
+			}
+			return err
+		}
+		appended++
+		counters = counters[size:]
+		r.log.Debug("reconcile: stats collected",
+			"report_id", entry.ReportID,
+			"counters", size,
+			"window_start", windowStart.Format(time.RFC3339))
 	}
 	r.lastStatsRead = readAt
-	r.log.Debug("reconcile: stats collected",
-		"report_id", entry.ReportID,
-		"counters", len(counters),
-		"window_start", windowStart.Format(time.RFC3339))
 	return nil
 }
 
@@ -213,11 +235,29 @@ func (r *Reconciler) report(ctx context.Context, applied appliedState) error {
 
 // shipStats ships the buffered stats batches one by one — each carries its own
 // report_id, which is what the control plane dedups on.
+//
+// Очередь строго FIFO, поэтому застрявшая голова останавливает ВСЁ, что накопится
+// следом. Отсюда разделение отказов: батч, который не примут никогда, выбрасывается
+// с громким логом, а временный отказ прекращает цикл и повторяется на следующем.
 func (r *Reconciler) shipStats(ctx context.Context) error {
 	for _, entry := range r.stats.Pending() {
 		accepted, err := r.cp.ShipStats(ctx, controlplane.BatchFromEntry(entry))
 		if err != nil {
-			return err
+			var httpErr *controlplane.HTTPError
+			if !errors.As(err, &httpErr) || !httpErr.Permanent() {
+				// 5xx, таймаут, оборванная сеть, 401/429 — повторяем на следующем цикле,
+				// буфер держим: данные важнее, control-plane вернётся.
+				return err
+			}
+			r.log.Error("reconcile: stats batch rejected permanently, dropping",
+				"report_id", entry.ReportID,
+				"status", httpErr.Status,
+				"counters", len(entry.Counters),
+				"err", err)
+			if err := r.stats.MarkShipped(entry.ReportID); err != nil {
+				return fmt.Errorf("drop rejected %s: %w", entry.ReportID, err)
+			}
+			continue
 		}
 		// accepted=false — батч уже принят control-plane раньше. Ретрай даст тот же
 		// ответ, поэтому дропаем буфер точно так же, как при accepted=true.

@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import {
   CONVERSATION_STATUSES,
+  acceptSuggestion,
   errorMessage,
+  generateSuggestion,
   getConversation,
   getConversations,
   patchConversation,
+  rejectSuggestion,
   replyToConversation,
+  type AiSuggestion,
   type ConversationListItem,
 } from "../api";
 import { useResource } from "../useResource";
@@ -15,10 +19,48 @@ import EmptyState from "../components/EmptyState";
 import ErrorBox from "../components/ErrorBox";
 import Loading from "../components/Loading";
 import Field from "../components/Field";
+import SupportKbPanel from "./SupportKbPanel";
+import SupportAiPanel from "./SupportAiPanel";
 
 const POLL_MS = 10_000;
 
+const TABS = [
+  { key: "dialogs", label: "Диалоги" },
+  { key: "kb", label: "База знаний" },
+  { key: "ai", label: "Провайдер ИИ" },
+] as const;
+
+type Tab = (typeof TABS)[number]["key"];
+
 export default function SupportPage() {
+  const [tab, setTab] = useState<Tab>("dialogs");
+
+  return (
+    <>
+      <div className="page-head">
+        <h1>Поддержка</h1>
+        <div className="head-tools">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className={`btn ${tab === t.key ? "btn-primary" : ""}`.trim()}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === "dialogs" && <DialogsPanel />}
+      {tab === "kb" && <SupportKbPanel />}
+      {tab === "ai" && <SupportAiPanel />}
+    </>
+  );
+}
+
+function DialogsPanel() {
   const [status, setStatus] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const list = useResource(() => getConversations(status || undefined), [status]);
@@ -37,21 +79,18 @@ export default function SupportPage() {
 
   return (
     <>
-      <div className="page-head">
-        <h1>Поддержка</h1>
-        <div className="head-tools">
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="">Все статусы</option>
-            {CONVERSATION_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="btn" onClick={list.reload}>
-            Обновить
-          </button>
-        </div>
+      <div className="head-tools" style={{ justifyContent: "flex-end", marginBottom: 12 }}>
+        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="">Все статусы</option>
+          {CONVERSATION_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn" onClick={list.reload}>
+          Обновить
+        </button>
       </div>
 
       <div className="split">
@@ -112,6 +151,9 @@ function ConversationPane({ id, onChanged }: { id: string; onChanged: () => void
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [assignee, setAssignee] = useState("");
+  /** Подсказка, взятая в работу: её текст сейчас в поле ответа. */
+  const [usedSuggestion, setUsedSuggestion] = useState<AiSuggestion | null>(null);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -130,8 +172,14 @@ function ConversationPane({ id, onChanged }: { id: string; onChanged: () => void
     setError(null);
     setNotice(null);
     try {
-      const result = await replyToConversation(id, text.trim());
+      // Правку фиксируем ДО отправки: иначе останется статус accepted у текста,
+      // который оператор переписал, и сравнивать качество подсказок будет не с чем.
+      if (usedSuggestion && text.trim() !== usedSuggestion.content.trim()) {
+        await acceptSuggestion(usedSuggestion.id, text.trim());
+      }
+      const result = await replyToConversation(id, text.trim(), usedSuggestion?.id);
       setText("");
+      setUsedSuggestion(null);
       setNotice(
         result.deduped
           ? "Такое сообщение уже отправлялось — дубль отброшен"
@@ -171,11 +219,53 @@ function ConversationPane({ id, onChanged }: { id: string; onChanged: () => void
     }
   };
 
+  const takeSuggestion = async (suggestion: AiSuggestion) => {
+    setError(null);
+    try {
+      await acceptSuggestion(suggestion.id);
+      setText(suggestion.content);
+      setUsedSuggestion(suggestion);
+      conv.reload();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
+  const dropSuggestion = async (suggestion: AiSuggestion) => {
+    setError(null);
+    try {
+      await rejectSuggestion(suggestion.id);
+      if (usedSuggestion?.id === suggestion.id) setUsedSuggestion(null);
+      conv.reload();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
+  const requestSuggestion = async () => {
+    setGenerating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await generateSuggestion(id);
+      if (result.status === "skipped" || result.status === "failed") {
+        setNotice(`Подсказки не будет: ${result.reason ?? result.status}`);
+      }
+      conv.reload();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   if (conv.loading) return <Loading />;
   if (conv.error) return <ErrorBox error={conv.error} onRetry={conv.reload} />;
   if (!conv.data) return null;
 
   const c = conv.data;
+  // Список приходит от новых к старым: берём свежую неотработанную подсказку.
+  const suggestion = c.suggestions.find((s) => s.status === "proposed" || s.status === "accepted" || s.status === "edited");
 
   return (
     <div className="pane">
@@ -218,6 +308,53 @@ function ConversationPane({ id, onChanged }: { id: string; onChanged: () => void
         )}
       </div>
 
+      {suggestion ? (
+        <div className="suggestion">
+          <div className="suggestion-head">
+            <div>
+              <span className="strong">Подсказка ИИ</span>
+              <StatusBadge status={suggestion.status} />
+            </div>
+            <span className="muted small">
+              {suggestion.model ?? "модель не указана"} · {formatDateTime(suggestion.createdAt)}
+            </span>
+          </div>
+          <div className="msg-body">{suggestion.content}</div>
+          <div className="muted small">
+            {suggestion.documents.length === 0
+              ? "В базе знаний ничего подходящего не нашлось — проверьте факты перед отправкой."
+              : `Основано на: ${suggestion.documents.map((d) => d.title).join(", ")}`}
+          </div>
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm" onClick={() => takeSuggestion(suggestion)}>
+              Принять
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setText(suggestion.content);
+                setUsedSuggestion(suggestion);
+              }}
+            >
+              Править
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => dropSuggestion(suggestion)}>
+              Отклонить
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="suggestion">
+          <div className="muted small">Подсказки ИИ на последнее сообщение нет.</div>
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm" onClick={requestSuggestion} disabled={generating}>
+              {generating ? "Генерируем…" : "Сгенерировать"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="reply">
         <textarea
           value={text}
@@ -226,6 +363,7 @@ function ConversationPane({ id, onChanged }: { id: string; onChanged: () => void
           placeholder="Ответ оператора — уйдёт подписчику в Telegram"
         />
         <div className="reply-actions">
+          {usedSuggestion && <span className="muted small">текст взят из подсказки ИИ</span>}
           {notice && <span className="muted small">{notice}</span>}
           <button type="button" className="btn btn-primary" onClick={send} disabled={sending || !text.trim()}>
             {sending ? "Отправляем…" : "Ответить"}

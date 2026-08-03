@@ -1,12 +1,12 @@
 import { Body, Controller, Inject, Logger, Post } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import {
   extractOrderIdFromStarsPayload,
   settingNumber,
   verifyStarsCharge,
   STARS_INTERNAL_CONFIRM_HEADER,
-} from "@vpn/payments";
+} from "@corelink/payments";
 import { DB } from "../db/db.module.js";
 import { loadConfig } from "../config.js";
 import { MerchantService } from "./merchant.service.js";

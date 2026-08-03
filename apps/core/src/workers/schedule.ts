@@ -16,6 +16,9 @@ export const SCHEDULE: Record<JobName, string> = {
   "infra-renewal-reminder": "41 10 * * *",
   "payment-reconcile": "19,49 * * * *",
   "abuse-scan": "37 */2 * * *",
+  // Страховка: штатно джоба ставится сразу при приёме сообщения, сюда попадают
+  // только те диалоги, чья постановка не доехала (рестарт, недоступный Redis).
+  "ai-suggest": "2-57/5 * * * *",
   "maintenance": "51 4 * * *",
 };
 

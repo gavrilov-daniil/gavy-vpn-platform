@@ -1,5 +1,5 @@
 import { Body, Controller, Headers, HttpCode, Post, UnauthorizedException } from "@nestjs/common";
-import { safeCompare } from "@vpn/core-kit";
+import { safeCompare } from "@corelink/core-kit";
 import { loadConfig } from "../config.js";
 import { AdminBotClient } from "../admin-bot/admin-bot.client.js";
 import { BotService, type NotifyButton, type SendResult } from "./bot.service.js";

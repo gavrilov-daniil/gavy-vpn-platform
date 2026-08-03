@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
-import { PROVIDER_SPECS } from "@vpn/payments";
+import { PROVIDER_SPECS } from "@corelink/payments";
 import { MerchantService } from "./merchant.service.js";
 
 /** Управление мерчантами из админки: подключить, настроить ключи, включить, проверить. */

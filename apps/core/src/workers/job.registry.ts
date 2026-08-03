@@ -10,6 +10,7 @@ import { TouchpointsRunJob } from "./jobs/touchpoints-run.job.js";
 import { BroadcastResumeJob } from "./jobs/broadcast-resume.job.js";
 import { PaymentReconcileJob } from "./jobs/payment-reconcile.job.js";
 import { AbuseScanJob } from "./jobs/abuse-scan.job.js";
+import { AiSuggestJob } from "./jobs/ai-suggest.job.js";
 import { MaintenanceJob } from "./jobs/maintenance.job.js";
 
 export interface JobRunRecord {
@@ -42,6 +43,7 @@ export class JobRegistry {
     broadcastResume: BroadcastResumeJob,
     paymentReconcile: PaymentReconcileJob,
     abuseScan: AbuseScanJob,
+    aiSuggest: AiSuggestJob,
     maintenance: MaintenanceJob,
   ) {
     const runners: JobRunner[] = [
@@ -54,6 +56,7 @@ export class JobRegistry {
       broadcastResume,
       paymentReconcile,
       abuseScan,
+      aiSuggest,
       maintenance,
     ];
     for (const runner of runners) this.runners.set(runner.jobName, runner);

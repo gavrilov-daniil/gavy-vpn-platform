@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
 import type { Request } from "express";
-import { safeCompare } from "@vpn/core-kit";
+import { safeCompare } from "@corelink/core-kit";
 import { loadConfig } from "../config.js";
 import { headerValue, isUnderPrefix, normalizedPath } from "./request-path.js";
 

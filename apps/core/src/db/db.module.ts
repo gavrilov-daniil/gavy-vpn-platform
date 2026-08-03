@@ -1,5 +1,5 @@
 import { Global, Module } from "@nestjs/common";
-import { createDb, type Database } from "@vpn/db";
+import { createDb, type Database } from "@corelink/db";
 
 export const DB = Symbol("DB");
 

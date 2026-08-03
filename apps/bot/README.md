@@ -1,4 +1,4 @@
-# @vpn/bot
+# @corelink/bot
 
 Два Telegram-бота в одном процессе:
 
@@ -12,9 +12,9 @@
 Только из собранного `dist` — NestJS DI требует `emitDecoratorMetadata`, которую esbuild/tsx не эмитит.
 
 ```bash
-pnpm --filter @vpn/bot build
-pnpm --filter @vpn/bot start     # node dist/main.js
-pnpm --filter @vpn/bot dev       # tsc --watch + node --watch dist/main.js
+pnpm --filter @corelink/bot build
+pnpm --filter @corelink/bot start     # node dist/main.js
+pnpm --filter @corelink/bot dev       # tsc --watch + node --watch dist/main.js
 ```
 
 ## Транспорт: webhook vs polling
@@ -77,7 +77,7 @@ trial:activate
 
 ## Идемпотентность
 
-`buildIdempotencyKey` из `@vpn/core-kit` (окно 5 минут) считается по `telegram id + действие + параметры` и уходит в core заголовком `x-client-request-id`. Плюс барьер в памяти процесса от дабл-тапа. Барьер в памяти не переживает рестарт и не работает на втором инстансе — **несущий барьер именно дедуп в core**.
+`buildIdempotencyKey` из `@corelink/core-kit` (окно 5 минут) считается по `telegram id + действие + параметры` и уходит в core заголовком `x-client-request-id`. Плюс барьер в памяти процесса от дабл-тапа. Барьер в памяти не переживает рестарт и не работает на втором инстансе — **несущий барьер именно дедуп в core**.
 
 На запись ретраев нет (`retries: 0`): повтор создал бы второй платёж.
 
@@ -87,7 +87,7 @@ trial:activate
 
 ## Контракт core
 
-Всё, что бот зовёт, в `@vpn/core` реализовано:
+Всё, что бот зовёт, в `@corelink/core` реализовано:
 
 | Метод | Путь | Ответ |
 |---|---|---|

@@ -14,7 +14,7 @@ export interface CoreConfig {
   subRateLimitPerSub: RateLimitRule;
   /** Лимит выдачи на один IP. Заметно шире: за общим NAT сидит много честных клиентов. */
   subRateLimitPerIp: RateLimitRule;
-  /** Откуда брать адрес клиента: true — левый хоп x-forwarded-for, false — socket-адрес. */
+  /** Откуда брать адрес клиента: true — правый (ближайший к нам) хоп x-forwarded-for, false — socket-адрес. */
   subRateLimitTrustProxy: boolean;
   /** Окно «живого» устройства: не виденные дольше — не занимают слот hwid-лимита. */
   hwidActiveWindowDays: number;

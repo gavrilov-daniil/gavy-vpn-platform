@@ -10,8 +10,8 @@ RUN pnpm install --frozen-lockfile
 
 COPY packages packages
 COPY apps/bot apps/bot
-RUN pnpm --filter @vpn/bot... build
-RUN pnpm --filter @vpn/bot --prod deploy /app
+RUN pnpm --filter @corelink/bot... build
+RUN pnpm --filter @corelink/bot --prod deploy /app
 
 FROM node:22-alpine AS runtime
 WORKDIR /app

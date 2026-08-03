@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { NodeStateService } from "./node-state.service.js";
 import { CascadeService } from "./cascade.service.js";
 import { StatsService } from "./stats.service.js";
@@ -73,6 +73,23 @@ export class NodesAdminController {
     return this.stats.usageBySubscription(shortUuid);
   }
 
+  /** Устройства подписки: что подключалось и когда. Байт по устройству нет — см. StatsService. */
+  @Get("usage/:shortUuid/devices")
+  devices(@Param("shortUuid") shortUuid: string) {
+    return this.stats.devicesBySubscription(shortUuid);
+  }
+
+  /** Сводка трафика: итоги, по дням, по нодам/странам + состав парка устройств. */
+  @Get("stats/overview")
+  statsOverview(@Query("days") days?: string) {
+    return this.stats.overview(positiveInt(days, 30));
+  }
+
+  @Get("stats/top-subscribers")
+  statsTop(@Query("days") days?: string, @Query("limit") limit?: string) {
+    return this.stats.topSubscribers(positiveInt(days, 30), positiveInt(limit, 50));
+  }
+
   /** Прогон детекта абьюза по накопленной статистике. */
   @Post("abuse/scan")
   scanAbuse(@Body() body: { volumeBytesPerWindow?: number; seedingRatio?: number; ipFanout?: number; windowHours?: number }) {
@@ -93,4 +110,10 @@ export class NodesAdminController {
   release(@Param("subscriptionId") subscriptionId: string) {
     return this.abuse.release(subscriptionId);
   }
+}
+
+/** Query-параметры приходят строками; мусор не должен уезжать в LIMIT/период запроса. */
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
 }

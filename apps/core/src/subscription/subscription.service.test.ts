@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { eq } from "drizzle-orm";
-import { schema, type Database } from "@vpn/db";
+import { schema, type Database } from "@corelink/db";
 import { cleanupOrg, closeDb, createSubscriber, createSubscription, openDb, seedNetwork } from "../testing/fixtures.test.js";
 import type { BotClient } from "../bot/bot.client.js";
 import { RateLimitService } from "../common/rate-limit.service.js";
@@ -117,6 +117,75 @@ describe("Выдача подписки: штатные состояния от�
       assert.deepEqual(remarks(res), ["Подписка приостановлена."]);
     });
   }
+
+  it("истёкшая подписка получает заглушку, а не инвентарь сети", async () => {
+    await standardNetwork();
+    const sub = await activeSubscription({ status: "expired", expireAt: new Date(Date.now() - DAY_MS) });
+
+    const res = await service.deliverByShortUuid(sub.shortUuid, happ());
+
+    assert.equal(res.status, 200);
+    assert.equal(res.kind, "stub");
+    assert.match(remarks(res)[0], /истекла/i);
+    assert.ok(!res.body.includes("de-direct"), "адреса и ключи каналов не имеют права уехать истёкшему");
+    assert.ok(!res.body.includes("PBK_"), "pbk каналов — карта сети для DPI");
+  });
+
+  it("подписка, которая ни разу не оплачивалась (inactive при создании), не видит каналов", async () => {
+    await standardNetwork();
+    const sub = await activeSubscription({ status: "inactive" });
+
+    const res = await service.deliverByShortUuid(sub.shortUuid, happ());
+
+    assert.equal(res.status, 200);
+    assert.equal(res.kind, "stub");
+    assert.match(remarks(res)[0], /не активна/i);
+    assert.ok(!res.body.includes("203.0.113."), "инвентарь сети не должен утекать любому, кто нажал /start");
+  });
+
+  it("срок вышел, а джоба ещё не прошлась — конфига всё равно нет", async () => {
+    await standardNetwork();
+    const sub = await activeSubscription({ status: "active", expireAt: new Date(Date.now() - 60_000) });
+
+    const res = await service.deliverByShortUuid(sub.shortUuid, happ());
+
+    assert.equal(res.kind, "stub", "гейт по сроку не может зависеть от того, успела ли отработать subscription-expire");
+    assert.match(remarks(res)[0], /истекла/i);
+  });
+
+  it("бессрочная подписка (expire_at пуст) работает: это ручная и служебная выдача", async () => {
+    await standardNetwork();
+    const sub = await activeSubscription({ status: "active", expireAt: null });
+
+    assert.equal((await service.deliverByShortUuid(sub.shortUuid, happ())).kind, "happ");
+  });
+
+  it("trial получает конфиг наравне с active", async () => {
+    await standardNetwork();
+    const sub = await activeSubscription({ status: "trial" });
+
+    assert.equal((await service.deliverByShortUuid(sub.shortUuid, happ())).kind, "happ");
+  });
+
+  it("заглушка не является рабочим профилем: подключение по ней никуда не ведёт", async () => {
+    await standardNetwork();
+
+    const res = await service.deliverByShortUuid(`su-${randomUUID().replace(/-/g, "")}`, happ());
+    const [stub] = parseConfigs(res);
+    const outbounds = stub.outbounds as Array<Record<string, unknown>>;
+    const rules = (stub.routing as { rules: Array<Record<string, unknown>> }).rules;
+
+    assert.deepEqual(
+      outbounds.map((o) => o.protocol),
+      ["blackhole"],
+      "freedom-outbound давал бы «Connected» и весь трафик НАПРЯМУЮ мимо VPN",
+    );
+    assert.ok(
+      rules.some((r) => r.outboundTag === "block" && !r.domain && !r.ip),
+      "нужен catch-all в blackhole, иначе Xray выпустит трафик дефолтным маршрутом",
+    );
+    assert.ok(!res.body.includes('"freedom"'), "freedom в заглушке недопустим ни в каком виде");
+  });
 });
 
 describe("Выдача подписки: рабочий конфиг", () => {

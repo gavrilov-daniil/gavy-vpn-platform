@@ -94,7 +94,7 @@ func run(configPath string, logger *slog.Logger) error {
 		return fmt.Errorf("no agent credentials: set bootstrap_token (enrollment) or agent_token (transitional shared secret)")
 	}
 
-	sb, err := stats.New(filepath.Join(cfg.StateDir, "stats-buffer.json"), agentEpochOrFallback(cfg, ident))
+	sb, err := stats.New(filepath.Join(cfg.StateDir, "stats-buffer.json"), agentEpochOrFallback(cfg, ident), logger)
 	if err != nil {
 		return fmt.Errorf("init stats buffer: %w", err)
 	}

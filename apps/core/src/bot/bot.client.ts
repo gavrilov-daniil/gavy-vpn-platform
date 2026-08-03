@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { HttpError, request } from "@vpn/core-kit";
+import { HttpError, request } from "@corelink/core-kit";
 import { loadConfig } from "../config.js";
 
 export interface BotSendInput {

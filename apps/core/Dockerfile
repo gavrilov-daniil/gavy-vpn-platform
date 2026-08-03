@@ -1,5 +1,5 @@
 # Сборка core. Монорепо на pnpm-workspace, поэтому в образ едет весь репозиторий:
-# core зависит от локальных пакетов (@vpn/db, @vpn/payments, @vpn/xray-config, @vpn/core-kit),
+# core зависит от локальных пакетов (@corelink/db, @corelink/payments, @corelink/xray-config, @corelink/core-kit),
 # и собрать его в отрыве нельзя.
 FROM node:22-alpine AS builder
 WORKDIR /repo
@@ -17,10 +17,10 @@ RUN pnpm install --frozen-lockfile
 
 COPY packages packages
 COPY apps/core apps/core
-RUN pnpm --filter @vpn/core... build
+RUN pnpm --filter @corelink/core... build
 
 # Прод-зависимости отдельно: dev-пакеты (typescript, tsx) в рантайме не нужны
-RUN pnpm --filter @vpn/core --prod deploy /app
+RUN pnpm --filter @corelink/core --prod deploy /app
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
@@ -30,7 +30,7 @@ ENV NODE_ENV=production
 RUN addgroup -S app && adduser -S app -G app
 
 COPY --from=builder --chown=app:app /app ./
-# Миграции едут внутри пакета @vpn/db (pnpm deploy их уже положил)
+# Миграции едут внутри пакета @corelink/db (pnpm deploy их уже положил)
 
 USER app
 EXPOSE 3100
