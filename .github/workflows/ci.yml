@@ -74,9 +74,8 @@ jobs:
       # только код, а нужен адрес и порт, к которым идёт соединение.
       - name: Тесты
         run: |
-          echo "resolv:"; getent ahosts localhost | head -5
           cd apps/core
-          timeout -k 10 300 node --import tsx --test --test-reporter=spec src/ai/suggestion.service.test.ts 2>&1 | tail -60
+          timeout -k 10 300 node --import tsx --test --test-reporter=spec "src/**/*.test.ts" 2>&1 | grep -A25 -i "econnrefused\|AggregateError" | head -60
 
       - run: pnpm build
 
