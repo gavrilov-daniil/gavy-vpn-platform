@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Обёртка forced-command. Ставится на боевой хост в /usr/local/bin/corelink-deploy,
+# ключ CI прибивается к ней в ~/.ssh/authorized_keys:
+#
+#   command="/usr/local/bin/corelink-deploy",no-agent-forwarding,no-port-forwarding,\
+#   no-pty,no-user-rc,no-X11-forwarding ssh-ed25519 AAAA... corelink-ci
+#
+# Смысл: утёкший ключ CI не даёт shell на хосте. Он умеет ровно одно — выкатить
+# ревизию, которая уже опубликована в реестре, или откатить последнюю.
+#
+# Обёртка лежит ОТДЕЛЬНО от репозитория намеренно: она сама обновляет deploy/ из
+# репозитория, и переписывать себя во время собственного выполнения ей нельзя —
+# bash дочитывает скрипт по ходу, и подменённый файл ломает исполнение на середине.
+set -euo pipefail
+
+DIR=${CORELINK_DIR:-/opt/corelink}
+REPO=${CORELINK_REPO:-gavrilov-daniil/corelink}
+
+mkdir -p "$DIR"
+exec > >(tee -a "$DIR/deploy.log") 2>&1
+printf '\n\n########## %s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SSH_ORIGINAL_COMMAND:-$*}"
+
+arg=${SSH_ORIGINAL_COMMAND:-${1:-}}
+set -- $arg
+cmd=${1:-}
+
+case "$cmd" in
+  --rollback)
+    # Конфигурация (compose, Caddyfile) откатывается вместе с образами: в прошлом
+    # релизе мог быть другой Caddyfile, и вернуть только образы — значит собрать
+    # стенд, которого никогда не существовало.
+    sha=$(sed -n 's/^VERSION=//p' "$DIR/release.prev.env" | tail -1)
+    [ -n "$sha" ] || { echo "нет release.prev.env — откатываться не к чему" >&2; exit 1; }
+    release_arg=--rollback
+    ;;
+  *)
+    case "$cmd" in
+      [0-9a-f]*) ;;
+      *) echo "ожидался git-sha или --rollback, получено: '$cmd'" >&2; exit 1 ;;
+    esac
+    [ "${#cmd}" -ge 7 ] && [ "${#cmd}" -le 40 ] || { echo "непохоже на git-sha: '$cmd'" >&2; exit 1; }
+    sha=$cmd
+    release_arg=$cmd
+    ;;
+esac
+
+# Compose-файл и Caddyfile берутся из той же ревизии, что и образы. Иначе на хосте
+# остаётся конфигурация от прошлого релиза — расхождение, которого нет ни на одном стенде.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+echo "конфигурация из $REPO@$sha"
+curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$sha" -o "$tmp/repo.tgz"
+tar -xzf "$tmp/repo.tgz" -C "$tmp"
+src=$(find "$tmp" -maxdepth 1 -mindepth 1 -type d | head -1)
+[ -f "$src/docker-compose.prod.yml" ] || { echo "в архиве нет docker-compose.prod.yml" >&2; exit 1; }
+
+install -m 644 "$src/docker-compose.prod.yml" "$DIR/docker-compose.prod.yml"
+rm -rf "$DIR/deploy"
+cp -r "$src/deploy" "$DIR/deploy"
+chmod +x "$DIR/deploy/"*.sh
+
+exec "$DIR/deploy/release.sh" "$release_arg"

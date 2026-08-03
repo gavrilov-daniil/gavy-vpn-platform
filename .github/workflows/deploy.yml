@@ -1,0 +1,118 @@
+name: deploy
+
+# Выкатка на боевой хост. Собственной сборки здесь нет: берётся образ, уже
+# опубликованный и прогнанный через стенд в release.yml.
+#
+# Хост исполняет не произвольную команду, а forced-command corelink-deploy
+# (deploy/corelink-deploy): утёкший ключ CI не даёт shell.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Полный git sha (пусто — HEAD выбранной ветки)"
+        required: false
+      rollback:
+        description: "Откатить на предыдущий релиз вместо выкатки"
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+# Отменять идущий деплой нельзя: он остановится посередине — между миграциями и
+# стартом контейнеров.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Автоматом — только с тега. main публикует образы, но в прод сам не едет.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      # Пусто — шаги уведомления просто пропускаются, деплой от этого не зависит
+      ALERT_TOKEN: ${{ secrets.ADMIN_BOT_TOKEN }}
+      ALERT_CHAT: ${{ secrets.DEPLOY_ALERT_CHAT_ID }}
+    steps:
+      - id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_SHA: ${{ inputs.sha }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ github.sha }}
+          ROLLBACK: ${{ inputs.rollback }}
+        run: |
+          if [ "$EVENT" = "workflow_run" ]; then sha=$RUN_SHA
+          elif [ -n "$INPUT_SHA" ]; then sha=$INPUT_SHA
+          else sha=$HEAD_SHA
+          fi
+          if [ "$ROLLBACK" = "true" ]; then
+            echo "command=--rollback" >> "$GITHUB_OUTPUT"
+            echo "label=откат" >> "$GITHUB_OUTPUT"
+          else
+            echo "command=$sha" >> "$GITHUB_OUTPUT"
+            echo "label=$sha" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # Ключ хоста прибит заранее: StrictHostKeyChecking=no превращает канал
+      # деплоя в цель для подмены.
+      - name: ssh
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Уведомление о старте
+        if: env.ALERT_TOKEN != ''
+        run: |
+          curl -sS -o /dev/null "https://api.telegram.org/bot$ALERT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$ALERT_CHAT" \
+            --data-urlencode "text=deploy: старт ${{ steps.target.outputs.label }} (${{ github.actor }})"
+
+      - name: Релиз
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          COMMAND: ${{ steps.target.outputs.command }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o ConnectTimeout=15 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$COMMAND" 2>&1 | tee release.log
+
+      - name: Итог
+        if: always()
+        run: |
+          {
+            echo "## deploy: ${{ steps.target.outputs.label }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| ревизия | \`${{ steps.target.outputs.sha }}\` |"
+            echo "| запустил | ${{ github.actor }} |"
+            echo "| результат | ${{ job.status }} |"
+            echo
+            echo '```'
+            tail -n 120 release.log 2>/dev/null || echo "лога нет: до хоста не дошли"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Скрипт релиза откатывается сам; сюда прилетает уже итог, а не «надо чинить».
+      - name: Уведомление о результате
+        if: always() && env.ALERT_TOKEN != ''
+        run: |
+          curl -sS -o /dev/null "https://api.telegram.org/bot$ALERT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$ALERT_CHAT" \
+            --data-urlencode "text=deploy ${{ steps.target.outputs.label }}: ${{ job.status }} — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

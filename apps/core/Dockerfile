@@ -26,6 +26,11 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Ревизия сборки. Отдаётся в /healthz, по ней деплой убеждается, что поднялся
+# именно выкатываемый образ, а не остался работать прежний контейнер.
+ARG GIT_SHA=dev
+ENV APP_VERSION=$GIT_SHA
+
 # Не от root: у процесса нет причин иметь права на систему
 RUN addgroup -S app && adduser -S app -G app
 

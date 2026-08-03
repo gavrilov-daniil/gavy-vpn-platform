@@ -1,0 +1,174 @@
+name: release
+
+# Публикация артефактов. Прод отсюда не трогается — этим занимается deploy.yml.
+#
+# На боевой хост едут ГОТОВЫЕ образы из GHCR, а не git-ревизия: на 2 vCPU / 4 ГБ
+# сборка трёх образов — это и риск OOM ровно в момент обновления, и артефакт,
+# отличный от прошедшего проверки.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/corelink
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: core
+            dockerfile: apps/core/Dockerfile
+            target: ""
+          - app: bot
+            dockerfile: apps/bot/Dockerfile
+            target: ""
+          - app: admin
+            dockerfile: apps/admin/Dockerfile
+            target: dist
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # sha-<полный sha> — основной, неперезаписываемый ориентир: именно его принимает
+      # release.sh на хосте. Остальные теги — для людей.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.app }}
+          tags: |
+            type=raw,value=sha-${{ github.sha }}
+            type=ref,event=tag
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: GIT_SHA=${{ github.sha }}
+          # Кэш слоёв между прогонами: без него каждый образ заново тянет pnpm install
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          provenance: true
+          sbom: true
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}-${{ matrix.app }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  # Стенд поднимается ИЗ РЕЕСТРА, а не из локальной сборки: проверять надо ровно тот
+  # артефакт, который поедет в прод. Прежняя джоба собирала образы заново и потому
+  # доказывала меньше, чем казалось.
+  smoke:
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Фиктивные, но валидные по формату значения: без них compose не раскрывается
+      - name: Тестовый .env
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=ci-postgres-pw
+          SECRETS_MASTER_KEY=ci-fake-master-key-0123456789
+          ADMIN_TOKEN=ci-fake-admin-token
+          SERVICE_TOKEN=ci-fake-service-token
+          SUB_PUBLIC_HOST=sub.localhost
+          ADMIN_PUBLIC_HOST=admin.localhost
+          BOT_TOKEN=111111:ci-fake-bot-token
+          EOF
+
+      - name: Стенд из опубликованных образов
+        env:
+          CORE_IMAGE: ${{ env.IMAGE_PREFIX }}-core:sha-${{ github.sha }}
+          BOT_IMAGE: ${{ env.IMAGE_PREFIX }}-bot:sha-${{ github.sha }}
+          ADMIN_IMAGE: ${{ env.IMAGE_PREFIX }}-admin:sha-${{ github.sha }}
+        run: |
+          docker compose -f docker-compose.prod.yml up -d postgres redis
+          timeout 90 sh -c 'until docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U vpn -d vpn_platform; do sleep 2; done'
+          docker compose -f docker-compose.prod.yml run --rm migrate
+          docker compose -f docker-compose.prod.yml up -d core worker admin-build caddy
+
+      # Тот же файл, что гоняется на хосте после релиза: одни и те же проверки на
+      # стенде и в проде — иначе «зелёный CI» и «рабочий прод» расходятся молча.
+      - name: Проверки
+        env:
+          SUB_HOST: sub.localhost
+          ADMIN_HOST: admin.localhost
+          RESOLVE_IP: 127.0.0.1
+          EXPECT_VERSION: ${{ github.sha }}
+        run: bash deploy/verify.sh
+
+      - name: Логи при падении
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail=80
+
+      - name: Убрать стенд
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v
+
+  # Агенты приезжают на ноды одним статическим бинарником — их место в GitHub Release,
+  # а не в образе. Обновление ноды остаётся ручным шагом оператора.
+  agents:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: apps/node-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: apps/node-agent/go.sum
+
+      - run: make all
+
+      - name: Контрольные суммы
+        run: cd dist && sha256sum node-agent-linux-* > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/node-agent/dist/node-agent-linux-amd64
+            apps/node-agent/dist/node-agent-linux-arm64
+            apps/node-agent/dist/SHA256SUMS
+          body: |
+            Образы: `ghcr.io/${{ github.repository_owner }}/corelink-{core,bot,admin}:sha-${{ github.sha }}`
+
+            Выкатка: workflow `deploy` → sha `${{ github.sha }}`.

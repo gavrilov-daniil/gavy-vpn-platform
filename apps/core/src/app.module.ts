@@ -1,5 +1,6 @@
 import { Controller, Get, Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
+import { loadConfig } from "./config.js";
 import { AdminGuard } from "./common/admin.guard.js";
 import { RateLimitGuard } from "./common/rate-limit.guard.js";
 import { RateLimitService } from "./common/rate-limit.service.js";
@@ -19,9 +20,13 @@ import { WorkersModule } from "./workers/workers.module.js";
 
 @Controller()
 class HealthController {
+  private readonly cfg = loadConfig();
+
+  // version — ревизия образа. Деплой сверяет её с выкатываемой: без этой сверки
+  // «контейнер не пересоздался» неотличимо от успешного релиза.
   @Get("healthz")
   health() {
-    return { ok: true };
+    return { ok: true, version: this.cfg.appVersion };
   }
 }
 

@@ -9,7 +9,7 @@ import { AdminBotClient } from "./admin-bot/admin-bot.client.js";
 class HealthController {
   @Get("healthz")
   health() {
-    return { ok: true };
+    return { ok: true, version: process.env.APP_VERSION ?? "dev" };
   }
 }
 

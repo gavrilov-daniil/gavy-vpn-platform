@@ -178,7 +178,11 @@ jobs:
   # пустом ACME_EMAIL, команда миграций ссылалась на несуществующий drizzle-kit,
   # а /internal/agent/* не проксировался — ни одна нода не могла бы подключиться.
   # Ни один из трёх не ловился прежним CI: он собирал код, но не образы и не стенд.
-  deploy:
+  #
+  # Здесь образы собираются локально — на PR публиковать их некуда. Тот же стенд, но
+  # уже из опубликованных образов, поднимает release.yml: в прод едет проверенный
+  # артефакт, а не пересобранный заново.
+  stack:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -213,7 +217,9 @@ jobs:
             || { echo "в Caddyfile нет маршрута /internal/agent/* — ноды не смогут подключиться"; exit 1; }
 
       - name: Сборка образов
-        run: docker compose -f docker-compose.prod.yml build
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: docker compose -f docker-compose.prod.yml -f docker-compose.build.yml build
 
       - name: БД
         run: |
@@ -227,29 +233,14 @@ jobs:
       - name: Стенд
         run: docker compose -f docker-compose.prod.yml up -d core worker admin-build caddy
 
-      - name: Смоук через Caddy
-        run: |
-          timeout 90 sh -c 'until curl -sk --resolve sub.localhost:443:127.0.0.1 https://sub.localhost/healthz | grep -q "\"ok\":true"; do sleep 3; done'
-
-          # Ручка агентов должна отвечать 401 (нет токена), а не 404: 404 означал бы,
-          # что запрос до core не доходит.
-          code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST \
-            --resolve sub.localhost:443:127.0.0.1 https://sub.localhost/internal/agent/enroll \
-            -H 'content-type: application/json' -d '{}')
-          echo "/internal/agent/enroll → $code"
-          [ "$code" = "404" ] && { echo "агенты не достучатся до core"; exit 1; }
-
-          # Админский API не должен быть виден на домене подписки
-          code=$(curl -sk -o /dev/null -w '%{http_code}' \
-            --resolve sub.localhost:443:127.0.0.1 https://sub.localhost/api/admin/merchants)
-          echo "админка на домене подписки → $code"
-          [ "$code" = "404" ] || { echo "админский API торчит на домене подписки"; exit 1; }
-
-          # А на своём домене — отвечает и требует токен
-          code=$(curl -sk -o /dev/null -w '%{http_code}' \
-            --resolve admin.localhost:443:127.0.0.1 https://admin.localhost/api/admin/merchants)
-          echo "админка на своём домене → $code"
-          [ "$code" = "401" ] || { echo "ожидался 401 без токена"; exit 1; }
+      # Тот же файл, что гоняется на хосте после релиза
+      - name: Проверки
+        env:
+          SUB_HOST: sub.localhost
+          ADMIN_HOST: admin.localhost
+          RESOLVE_IP: 127.0.0.1
+          EXPECT_VERSION: ${{ github.sha }}
+        run: bash deploy/verify.sh
 
       - name: Логи при падении
         if: failure()

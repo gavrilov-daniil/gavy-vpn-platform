@@ -98,7 +98,7 @@ async function bootstrap() {
       return;
     }
     await scheduler.start();
-    log.log(`core worker запущен (org=${cfg.defaultOrgId})`);
+    log.log(`core worker запущен (version=${cfg.appVersion} org=${cfg.defaultOrgId})`);
     return;
   }
 
@@ -126,7 +126,7 @@ async function bootstrap() {
   installBodyParsers(app);
   installAuditSink(app.get<Database>(DB), cfg.defaultOrgId);
   await app.listen(cfg.port);
-  log.log(`core api on :${cfg.port} (org=${cfg.defaultOrgId})`);
+  log.log(`core api on :${cfg.port} (version=${cfg.appVersion} org=${cfg.defaultOrgId})`);
 }
 
 void bootstrap();

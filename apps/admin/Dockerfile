@@ -14,5 +14,8 @@ RUN pnpm --filter @corelink/admin build
 # Результат забирает Caddy через volume-from или copy на этапе деплоя
 FROM alpine:3.20 AS dist
 WORKDIR /dist
+ARG GIT_SHA=dev
 COPY --from=builder /repo/apps/admin/dist ./
+# По /version.txt деплой проверяет, что Caddy отдаёт статику этого релиза, а не прошлого
+RUN printf '%s\n' "$GIT_SHA" > version.txt
 CMD ["true"]

@@ -27,14 +27,39 @@
 
 ## Минимальные требования
 
-2 vCPU / 4 ГБ / 40 ГБ. Меньше не стоит: Postgres, Redis и три Node-процесса. Docker и Docker Compose v2.
+2 vCPU / 4 ГБ / 40 ГБ. Меньше не стоит: Postgres, Redis и три Node-процесса. Docker и Docker Compose v2, `flock` (util-linux), `curl`.
 
-## Порядок
+## Конвейер
+
+```
+push main/tag → release.yml → образы в GHCR (sha-<полный git sha>) → стенд из этих образов
+                                                                          ↓
+                                          deploy.yml (environment production, ревью)
+                                                                          ↓
+                                     ssh forced-command → deploy/release.sh на хосте
+                                                                          ↓
+                                    pull → dump → migrate → up → verify → откат при провале
+```
+
+Артефакт — **образ**, а не git-ревизия. На хосте ничего не собирается: на 2 vCPU / 4 ГБ сборка трёх образов — это и риск OOM ровно в момент обновления, и артефакт, отличный от прошедшего проверки. Compose тянет образы по digest'ам из `release.env`; тег может быть перезаписан, digest — нет.
+
+Автоматом в прод едет только **тег** `v*`. Push в `main` публикует образы и прогоняет стенд, но прод не трогает.
+
+| Файл | Роль |
+|---|---|
+| `.github/workflows/release.yml` | сборка и публикация образов, стенд из них, бинарники агента на тегах |
+| `.github/workflows/deploy.yml` | выкатка и откат (вход `rollback`) |
+| `deploy/release.sh` | сам релиз на хосте: порядок шагов, дамп, проверка, автооткат |
+| `deploy/verify.sh` | проверки живого стенда; один и тот же файл в CI и на хосте |
+| `deploy/corelink-deploy` | обёртка forced-command: обновляет конфигурацию из репозитория и зовёт `release.sh` |
+
+## Подготовка хоста
 
 ```bash
-git clone https://github.com/gavrilov-daniil/corelink.git
-cd corelink
-cp .env.example .env
+sudo mkdir -p /opt/corelink && sudo chown "$USER" /opt/corelink
+cd /opt/corelink
+curl -fsSLO https://raw.githubusercontent.com/gavrilov-daniil/corelink/main/.env.example
+mv .env.example .env
 ```
 
 Заполнить `.env`. Обязательное, без чего core не стартует или раздел закрыт:
@@ -50,22 +75,35 @@ cp .env.example .env
 | `ADMIN_PUBLIC_HOST` | отдельный домен админки |
 | `BOT_TOKEN`, `BOT_WEBHOOK_SECRET` | клиентский бот; при заданном `BOT_WEBHOOK_URL` секрет обязателен, иначе бот не стартует |
 
-Запуск. Порядок важен дважды: миграции накатываются **до** старта приложений (иначе новый код работает против старой схемы), а бот поднимается **после переноса данных** — см. «Перенос данных с действующей панели».
+Дальше — канал выкатки. Ключ CI прибивается к forced-command: утёкший ключ не даёт shell на хосте, он умеет ровно одно — выкатить уже опубликованную ревизию или откатить последнюю.
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d postgres redis
-docker compose -f docker-compose.prod.yml run --rm migrate
-docker compose -f docker-compose.prod.yml up -d --build core worker admin-build caddy
+sudo curl -fsSL -o /usr/local/bin/corelink-deploy \
+  https://raw.githubusercontent.com/gavrilov-daniil/corelink/main/deploy/corelink-deploy
+sudo chmod +x /usr/local/bin/corelink-deploy
+
+ssh-keygen -t ed25519 -f ./corelink-ci -N '' -C corelink-ci     # приватную половину — в секрет DEPLOY_SSH_KEY
+cat >> ~/.ssh/authorized_keys <<EOF
+command="/usr/local/bin/corelink-deploy",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding $(cat ./corelink-ci.pub)
+EOF
 ```
 
-Команда миграций печатает `migrations: journal=N applied=N`. Если `applied` меньше — часть миграций пропущена, и она завершится с ошибкой (`packages/db/drizzle/meta/README.md`).
+Секреты в GitHub, окружение `production` (там же — required reviewer и политика веток):
 
-Проверка:
+| Секрет | Что это |
+|---|---|
+| `DEPLOY_HOST`, `DEPLOY_USER` | куда ходить по ssh |
+| `DEPLOY_SSH_KEY` | приватная половина ключа выше |
+| `DEPLOY_KNOWN_HOSTS` | вывод `ssh-keyscan <host>`; без пиннинга канал деплоя становится целью для подмены |
+| `ADMIN_BOT_TOKEN`, `DEPLOY_ALERT_CHAT_ID` | уведомления о релизе; не заданы — шаги пропускаются |
+
+Первый релиз — тем же скриптом, что и все последующие. Он поднимает и бота тоже, а бот с заданным `BOT_TOKEN` уходит в long polling и начинает принимать пользователей — поэтому **до переноса данных `BOT_TOKEN` в `.env` не заполняют** (см. «Перенос данных»).
 
 ```bash
-curl -s https://$SUB_PUBLIC_HOST/healthz            # {"ok":true}
-curl -s -o /dev/null -w '%{http_code}\n' https://$ADMIN_PUBLIC_HOST/api/admin/merchants   # 401 без токена — так и должно быть
+ssh -i ./corelink-ci <user>@<host> <полный git sha>
 ```
+
+Скрипт печатает `migrations: journal=N applied=N`. Если `applied` меньше — часть миграций пропущена, и он падает (`packages/db/drizzle/meta/README.md`). Дальше он сам гоняет `deploy/verify.sh`: версия в `/healthz` и в `/version.txt` админки обязана совпасть с выкатываемой, `/internal/agent/*` не должен отдавать 404, админский API — быть невидимым на домене подписки и требовать токен на своём.
 
 ## Первые шаги в админке
 
@@ -89,9 +127,9 @@ curl -s -o /dev/null -w '%{http_code}\n' https://$ADMIN_PUBLIC_HOST/api/admin/me
 curl -X POST https://$ADMIN_PUBLIC_HOST/api/admin/import/remnawave \
   -H "x-admin-token: …" -H 'content-type: application/json' -d '{}'          # dry-run
 curl -X POST … -d '{"apply":true,"withDevices":true}'                        # запись
-
-docker compose -f docker-compose.prod.yml up -d --build bot                  # бот — только теперь
 ```
+
+Бот — только теперь: заполнить `BOT_TOKEN` в `.env` на хосте и перевыкатить ту же ревизию (`ssh … <тот же sha>`).
 
 Импорт идемпотентен: повторный прогон обновляет и не двоит. Идентичность (`short_uuid`, `vless_uuid`) переносится дословно — иначе клиенты молча отвалятся.
 
@@ -106,18 +144,28 @@ docker compose -f docker-compose.prod.yml up -d --build bot                  # �
 
 ## Обновление
 
-```bash
-git pull
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml run --rm migrate
-docker compose -f docker-compose.prod.yml up -d
-```
+Тег `v*` → `release.yml` собирает и проверяет → `deploy.yml` ждёт подтверждения в окружении `production` → хост выкатывает. Руками из UI — тот же `deploy.yml` с полем `sha`, там же галка `rollback`.
 
-Миграции применяются отдельной командой, а не на старте контейнера: иначе два одновременно поднявшихся инстанса накатывали бы их параллельно. Сначала `build`, потом миграции, потом `up`: так новый код не успевает поработать со старой схемой.
+Что делает `deploy/release.sh` и почему в таком порядке:
+
+| Шаг | Зачем именно здесь |
+|---|---|
+| `docker compose config -q` | не хватает переменной в `.env` — падаем **до** того, как что-то тронули; иначе это всплывёт крэш-циклом уже после снятия старого контейнера |
+| `docker pull` | сеть отработала до любых изменений на живом стенде; digest'ы фиксируются здесь |
+| `pg_dump` | единственная точка отката схемы: миграции назад не откатываются |
+| `run --rm migrate` | до старта нового кода, иначе новый код работает против старой схемы. Тем же образом, что поедет в core |
+| `up -d` | Caddy держит запрос до 10 секунд (`lb_try_duration`), поэтому 3-5 секунд рестарта наружу не видны |
+| `verify.sh` | не сошлось — автоматом возвращаются прошлые digest'ы из `release.prev.env` |
+
+Между миграциями и стартом нового кода **старый код короткое время работает с новой схемой**. Отсюда правило: разрушающий DDL (`drop column`, `not null` на существующей колонке) едет отдельным релизом, после того как код, знавший старую схему, снят.
+
+Откат возвращает образы, но **не схему**. Если релиз сломался уже после миграций, точка восстановления — дамп, снятый этим же скриптом.
 
 ## Резервные копии
 
 Ценное — Postgres и `SECRETS_MASTER_KEY`. Без ключа дамп бесполезен для восстановления мерчантов; без дампа ключ бесполезен. Хранить раздельно.
+
+Перед каждым релизом дамп снимается автоматически в `/opt/corelink/backups` (хранятся последние 10). Это защита от неудачной миграции, а не резервное копирование: дампы лежат на том же диске, что и база. Регулярную выгрузку на сторону надо ставить отдельно.
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T postgres \
@@ -131,3 +179,7 @@ Reality-приватники нод в БД **не хранятся** — они
 - Переключение DNS домена подписки на новый хост — ручной шаг, делается после того, как golden-diff сошёлся и ноды перехвачены.
 - Раскладка приватного ключа Reality на ноду при перехвате (режим `import`) — ручной шаг оператора.
 - mTLS между агентом и core: серверной половины нет, аутентификация по per-node токену.
+- Обновление агентов на нодах: бинарники публикуются в GitHub Release с `SHA256SUMS`, раскладывает их оператор.
+- `.env` на хосте: правится руками, версий не имеет. Релиз только проверяет, что compose с ним раскрывается.
+- Выгрузка дампов за пределы хоста.
+- Actions прибиты по мажорным тегам, а не по SHA — следующий шаг ужесточения цепочки поставки.

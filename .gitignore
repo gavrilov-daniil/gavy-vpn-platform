@@ -10,6 +10,12 @@ dist/
 *.pem
 *.key
 
+# состояние релиза — живёт на хосте (/opt/corelink), не в репозитории
+release.env
+release.prev.env
+deploy.log
+backups/
+
 # go
 apps/node-agent/bin/
 apps/node-agent/dist/

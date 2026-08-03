@@ -1,0 +1,31 @@
+# Оверлей для локальной сборки образов. В проде не используется: туда образы
+# приезжают из GHCR по digest, а собирать их на боевой машине нечем (2 vCPU / 4 ГБ).
+#
+#   GIT_SHA=$(git rev-parse --short HEAD) \
+#     docker compose -f docker-compose.prod.yml -f docker-compose.build.yml build
+#
+# Сборка описана только у core: worker и migrate используют тот же образ и получат
+# его по тегу из ${CORE_IMAGE}.
+
+services:
+  core:
+    build:
+      context: .
+      dockerfile: apps/core/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+
+  bot:
+    build:
+      context: .
+      dockerfile: apps/bot/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+
+  admin-build:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      target: dist
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}

@@ -17,6 +17,9 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+ARG GIT_SHA=dev
+ENV APP_VERSION=$GIT_SHA
+
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=builder --chown=app:app /app ./
 
