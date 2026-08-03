@@ -70,15 +70,13 @@ jobs:
       - name: Схема для тестов
         run: pnpm --filter @corelink/db build && pnpm --filter @corelink/db migrate
 
-      # ВРЕМЕННО: turbo на GitHub Actions буферизует вывод задачи и при зависании не
-      # печатает ничего. stream + жёсткий таймаут показывают, на каком тесте встаёт.
+      # ВРЕМЕННО: подробности ECONNREFUSED из падающего в CI файла — TAP печатает
+      # только код, а нужен адрес и порт, к которым идёт соединение.
       - name: Тесты
         run: |
-          TURBO_LOG_ORDER=stream timeout -k 10 420 pnpm test || {
-            echo "=== процессы ==="; ps -ef | tail -30
-            echo "=== соединения ==="; ss -tanp 2>/dev/null | head -30
-            exit 1
-          }
+          echo "resolv:"; getent ahosts localhost | head -5
+          cd apps/core
+          timeout -k 10 300 node --import tsx --test --test-reporter=spec src/ai/suggestion.service.test.ts 2>&1 | tail -60
 
       - run: pnpm build
 
