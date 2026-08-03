@@ -70,16 +70,10 @@ jobs:
       - name: Схема для тестов
         run: pnpm --filter @corelink/db build && pnpm --filter @corelink/db migrate
 
+      # Таймаут — не перестраховка: turbo не отдаёт статус упавшей задачи и висит,
+      # а без предела джоб занимал бы раннер шесть часов вместо семи минут.
       - name: Тесты
-        run: |
-          (cd packages/core-kit && node --import tsx --test "src/**/*.test.ts" > /dev/null 2>&1) &
-          (cd packages/payments && node --import tsx --test "src/**/*.test.ts" > /dev/null 2>&1) &
-          (cd packages/xray-config && node --import tsx --test "src/**/*.test.ts" > /dev/null 2>&1) &
-          cd apps/core
-          timeout -k 10 300 node --import tsx --test --test-reporter=spec "src/**/*.test.ts" > /tmp/core.log 2>&1
-          echo "код: $?"
-          grep -B3 -A22 -i "econnrefused" /tmp/core.log | head -70
-          wait
+        run: timeout -k 10 600 pnpm test
 
       - run: pnpm build
 
