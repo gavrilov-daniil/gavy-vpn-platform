@@ -70,12 +70,10 @@ jobs:
       - name: Схема для тестов
         run: pnpm --filter @corelink/db build && pnpm --filter @corelink/db migrate
 
-      # ВРЕМЕННО: подробности ECONNREFUSED из падающего в CI файла — TAP печатает
-      # только код, а нужен адрес и порт, к которым идёт соединение.
+      # Таймаут — не перестраховка: turbo не отдаёт статус упавшей задачи и висит,
+      # а без предела джоб занимал бы раннер шесть часов вместо семи минут.
       - name: Тесты
-        run: |
-          cd apps/core
-          timeout -k 10 300 node --import tsx --test --test-reporter=spec "src/**/*.test.ts" 2>&1 | grep -A25 -i "econnrefused\|AggregateError" | head -60
+        run: timeout -k 10 600 pnpm test
 
       - run: pnpm build
 

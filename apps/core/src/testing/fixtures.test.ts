@@ -27,8 +27,13 @@ process.env.SECRETS_MASTER_KEY = MASTER_KEY;
 // Лимитер должен считать в памяти процесса, иначе тесты зависят от состояния Redis.
 delete process.env.REDIS_URL;
 
+/**
+ * Два соединения на файл. Тестовый процесс делает запросы по одному, а файлов
+ * два десятка, и гоняются они пачками: с дефолтным пулом в 10 сумма упирается
+ * в лимит соединений сервера, и часть коннектов просто отбивается.
+ */
 export function openDb(): Database {
-  return createDb(TEST_DATABASE_URL);
+  return createDb(TEST_DATABASE_URL, 2);
 }
 
 export async function closeDb(db: Database): Promise<void> {
