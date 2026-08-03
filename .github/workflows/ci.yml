@@ -70,7 +70,15 @@ jobs:
       - name: Схема для тестов
         run: pnpm --filter @corelink/db build && pnpm --filter @corelink/db migrate
 
-      - run: pnpm test
+      # ВРЕМЕННО: turbo на GitHub Actions буферизует вывод задачи и при зависании не
+      # печатает ничего. stream + жёсткий таймаут показывают, на каком тесте встаёт.
+      - name: Тесты
+        run: |
+          TURBO_LOG_ORDER=stream timeout -k 10 420 pnpm test || {
+            echo "=== процессы ==="; ps -ef | tail -30
+            echo "=== соединения ==="; ss -tanp 2>/dev/null | head -30
+            exit 1
+          }
 
       - run: pnpm build
 
