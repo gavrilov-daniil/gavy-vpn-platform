@@ -54,9 +54,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Версия не задаётся: pnpm/action-setup@v4 берёт её из packageManager в
+      # package.json и падает, если ту же версию продублировать здесь.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
@@ -126,9 +126,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Версия не задаётся: pnpm/action-setup@v4 берёт её из packageManager в
+      # package.json и падает, если ту же версию продублировать здесь.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
