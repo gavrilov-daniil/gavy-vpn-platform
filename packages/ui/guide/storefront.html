@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CoreLink — интернет без границ и без логов</title>
+    <link rel="icon" href="../assets/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../src/index.css" />
+    <style>
+      :root {
+        --cl-sticky-offset: 72px;
+      }
+
+      .site-nav {
+        position: sticky;
+        top: 0;
+        z-index: var(--cl-z-sticky);
+        background: var(--cl-bg);
+        border-bottom: 1px solid var(--cl-border);
+      }
+
+      .site-nav-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--cl-space-4);
+        padding-block: var(--cl-space-4);
+      }
+
+      .site-nav nav {
+        display: flex;
+        gap: var(--cl-space-6);
+      }
+
+      .site-nav nav a {
+        color: var(--cl-text-secondary);
+        font-size: var(--cl-text-md);
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: var(--cl-space-16);
+        align-items: center;
+      }
+
+      .section-head {
+        max-width: 640px;
+        margin-bottom: var(--cl-space-10);
+      }
+
+      .section-head h2 {
+        font-size: var(--cl-text-4xl);
+        margin-top: var(--cl-space-4);
+        line-height: var(--cl-leading-tight);
+      }
+
+      .section-head p {
+        margin-top: var(--cl-space-4);
+        color: var(--cl-text-secondary);
+        font-size: var(--cl-text-lg);
+      }
+
+      .quotes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--cl-space-8);
+      }
+
+      .site-footer {
+        border-top: 1px solid var(--cl-border);
+        padding-block: var(--cl-space-8);
+        color: var(--cl-text-muted);
+        font-size: var(--cl-text-sm);
+      }
+
+      .footer-inner {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--cl-space-6);
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      @media (max-width: 860px) {
+        .hero-grid,
+        .quotes {
+          grid-template-columns: 1fr;
+          gap: var(--cl-space-8);
+        }
+
+        .site-nav nav {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="site-nav">
+      <div class="cl-container site-nav-inner">
+        <img src="../assets/logo-lockup-dark.svg" alt="CoreLink" style="height: 26px" />
+        <nav>
+          <a href="#plans">Тарифы</a>
+          <a href="#how">Как подключить</a>
+          <a href="#faq">Вопросы</a>
+        </nav>
+        <a class="cl-btn cl-btn-primary" href="#plans">Подключить</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="cl-hero">
+        <div class="cl-container hero-grid">
+          <div class="cl-hero-content">
+            <p class="cl-eyebrow">VPN для тех, кто просто хочет, чтобы работало</p>
+            <h1 class="cl-display" style="margin-top: var(--cl-space-5)">
+              Интернет без границ и <span class="cl-marker">без логов</span>
+            </h1>
+            <p class="cl-lede">
+              4 страны, автоматическое переключение при блокировках, одна ссылка на все устройства.
+              От оплаты до рабочего подключения — минута.
+            </p>
+            <div class="cl-hero-actions">
+              <a class="cl-btn cl-btn-cta" href="#plans">Выбрать тариф</a>
+              <a class="cl-btn cl-btn-lg" href="#how">Как это работает</a>
+            </div>
+            <p class="cl-cta-note">
+              Оплата разовая, карта не сохраняется. 7 дней на возврат без вопросов.
+            </p>
+          </div>
+
+          <div class="cl-statement">
+            <div class="cl-statement-head">
+              <span class="cl-statement-title">Ваше подключение</span>
+              <span class="cl-badge cl-badge-success"><span class="cl-dot cl-dot-success"></span>Защищено</span>
+            </div>
+            <div class="cl-statement-row">
+              <span class="cl-statement-key">Локация</span>
+              <span class="cl-statement-value">Нидерланды · авто</span>
+            </div>
+            <div class="cl-statement-row">
+              <span class="cl-statement-key">Скорость</span>
+              <span class="cl-statement-value">940 Мбит/с</span>
+            </div>
+            <div class="cl-statement-row">
+              <span class="cl-statement-key">Устройства</span>
+              <span class="cl-statement-value">3 из 5</span>
+            </div>
+            <div class="cl-statement-row">
+              <span class="cl-statement-key">Подписка до</span>
+              <span class="cl-statement-value">12.08.2027</span>
+            </div>
+            <div class="cl-alert cl-alert-info" style="margin-top: var(--cl-space-4)">
+              <span class="cl-alert-body cl-small">
+                Вчера канал переключился на резервный автоматически — вы этого не заметили.
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cl-container">
+        <div class="cl-trustbar">
+          <div class="cl-trust-item">
+            <span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/eye-off.svg')"></span>
+            <div>
+              <div class="cl-trust-title">Логов нет</div>
+              <div class="cl-trust-text">Не храним историю подключений и посещений</div>
+            </div>
+          </div>
+          <div class="cl-trust-item">
+            <span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/switch.svg')"></span>
+            <div>
+              <div class="cl-trust-title">Автопереключение</div>
+              <div class="cl-trust-text">При блокировке канал меняется сам, без вашего участия</div>
+            </div>
+          </div>
+          <div class="cl-trust-item">
+            <span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/devices.svg')"></span>
+            <div>
+              <div class="cl-trust-title">Все устройства</div>
+              <div class="cl-trust-text">iPhone, Android, Windows, macOS — одна ссылка</div>
+            </div>
+          </div>
+          <div class="cl-trust-item">
+            <span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/wallet.svg')"></span>
+            <div>
+              <div class="cl-trust-title">Без автосписаний</div>
+              <div class="cl-trust-text">Платёж разовый, продление — только вручную</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cl-ink-panel" style="margin-top: var(--cl-space-20)">
+        <div class="cl-container cl-section">
+          <div class="section-head">
+            <p class="cl-eyebrow">01 — Что за этим стоит</p>
+            <h2>Сеть, которую видно только вам</h2>
+            <p>
+              Мы держим собственные узлы в четырёх странах и переключаем клиента на резервный канал
+              раньше, чем он заметит блокировку.
+            </p>
+          </div>
+          <div class="cl-stats">
+            <div>
+              <div class="cl-stat-value">99.9%</div>
+              <div class="cl-stat-label">Доступность за последние 90 дней</div>
+            </div>
+            <div>
+              <div class="cl-stat-value">4</div>
+              <div class="cl-stat-label">Страны на выбор, переключение мгновенное</div>
+            </div>
+            <div>
+              <div class="cl-stat-value">&lt; 1 мин</div>
+              <div class="cl-stat-label">От оплаты до рабочего подключения</div>
+            </div>
+            <div>
+              <div class="cl-stat-value">2 400+</div>
+              <div class="cl-stat-label">Активных подписок</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cl-container cl-section" id="plans">
+        <div class="section-head">
+          <p class="cl-eyebrow">02 — Тарифы</p>
+          <h2>Чем длиннее период, тем дешевле месяц</h2>
+          <p>
+            Страны и скорость одинаковые во всех тарифах. Отличаются трафик, число устройств и цена
+            месяца.
+          </p>
+        </div>
+
+        <div class="cl-plans">
+          <div class="cl-plan">
+            <div class="cl-plan-name">Месяц</div>
+            <div class="cl-plan-price">
+              <span class="cl-plan-amount">249 ₽</span>
+              <span class="cl-plan-period">/ месяц</span>
+            </div>
+            <div class="cl-plan-total">249 ₽ один раз за 30 дней</div>
+            <ul class="cl-plan-features">
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>100 ГБ трафика</li>
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>3 устройства</li>
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>4 страны, автовыбор</li>
+            </ul>
+            <button class="cl-btn cl-btn-lg">Выбрать месяц</button>
+          </div>
+
+          <div class="cl-plan is-featured">
+            <span class="cl-plan-flag">Выбирают чаще</span>
+            <div class="cl-plan-name">Год</div>
+            <div class="cl-plan-price">
+              <span class="cl-plan-amount">124 ₽</span>
+              <span class="cl-plan-period">/ месяц</span>
+              <span class="cl-plan-was">249 ₽</span>
+              <span class="cl-plan-save">−50%</span>
+            </div>
+            <div class="cl-plan-total">1 490 ₽ один раз за 12 месяцев</div>
+            <ul class="cl-plan-features">
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>Безлимитный трафик</li>
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>5 устройств</li>
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>Приоритетная поддержка</li>
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>Цена зафиксирована на год</li>
+            </ul>
+            <button class="cl-btn cl-btn-lg">Оплатить 1 490 ₽</button>
+          </div>
+
+          <div class="cl-plan">
+            <div class="cl-plan-name">Полгода</div>
+            <div class="cl-plan-price">
+              <span class="cl-plan-amount">165 ₽</span>
+              <span class="cl-plan-period">/ месяц</span>
+              <span class="cl-plan-save">−34%</span>
+            </div>
+            <div class="cl-plan-total">990 ₽ один раз за 6 месяцев</div>
+            <ul class="cl-plan-features">
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>Безлимитный трафик</li>
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>5 устройств</li>
+              <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>4 страны, автовыбор</li>
+            </ul>
+            <button class="cl-btn cl-btn-lg">Выбрать полгода</button>
+          </div>
+        </div>
+
+        <div class="cl-row" style="margin-top: var(--cl-space-6); justify-content: space-between">
+          <div class="cl-pay-methods">
+            <span class="cl-pay-method">СБП</span>
+            <span class="cl-pay-method">Банковская карта</span>
+            <span class="cl-pay-method">Telegram Stars</span>
+            <span class="cl-pay-method">Крипта</span>
+          </div>
+          <span class="cl-small cl-muted">
+            Платёж проходит на стороне банка — карту мы не видим и не храним.
+          </span>
+        </div>
+      </section>
+
+      <section class="cl-container cl-section" style="padding-top: 0">
+        <div class="cl-guarantee">
+          <span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/refund.svg'); width: 36px; height: 36px"></span>
+          <div>
+            <div class="cl-guarantee-title">Не подойдёт — вернём деньги</div>
+            <div class="cl-guarantee-text">
+              7 дней на возврат без объяснения причин. Напишите в поддержку — вернём полную сумму тем
+              же способом, которым платили. Отдельно просить и доказывать ничего не нужно.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cl-container cl-section" id="how" style="padding-top: 0">
+        <div class="section-head">
+          <p class="cl-eyebrow">03 — Подключение</p>
+          <h2>Три шага, ни одной настройки вручную</h2>
+        </div>
+        <div class="cl-steps">
+          <div class="cl-step">
+            <div class="cl-step-title">Оплатите тариф</div>
+            <div class="cl-step-text">СБП, карта, Stars или крипта. Регистрация и почта не нужны.</div>
+          </div>
+          <div class="cl-step">
+            <div class="cl-step-title">Откройте ссылку из бота</div>
+            <div class="cl-step-text">Придёт сразу после оплаты. Одна ссылка работает на всех устройствах.</div>
+          </div>
+          <div class="cl-step">
+            <div class="cl-step-title">Пользуйтесь</div>
+            <div class="cl-step-text">Приложение настроится само. При блокировке канал переключится без вас.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cl-container cl-section" style="padding-top: 0">
+        <div class="quotes">
+          <div class="cl-quote">
+            <p class="cl-quote-text">
+              «Поставил родителям — за полгода ни одного звонка „опять не работает“. Для меня это
+              главный показатель.»
+            </p>
+            <div class="cl-quote-author">
+              <span class="cl-quote-avatar">А</span>
+              <span>Алексей, подписка с марта 2025</span>
+            </div>
+          </div>
+          <div class="cl-quote">
+            <p class="cl-quote-text">
+              «Переключение при блокировках реально работает: заметил только по тому, что пинг
+              изменился.»
+            </p>
+            <div class="cl-quote-author">
+              <span class="cl-quote-avatar">М</span>
+              <span>Марина, подписка с января 2025</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cl-container cl-section" id="faq" style="padding-top: 0">
+        <div class="section-head">
+          <p class="cl-eyebrow">04 — Вопросы</p>
+          <h2>Что обычно спрашивают до оплаты</h2>
+        </div>
+        <div class="cl-faq">
+          <details class="cl-faq-item" open>
+            <summary>Спишут ли деньги повторно?</summary>
+            <div class="cl-faq-answer">
+              Нет. Платёж разовый, карта не сохраняется, автопродления нет. За три дня до конца
+              подписки бот напомнит — продлевать или нет, решаете вы.
+            </div>
+          </details>
+          <details class="cl-faq-item">
+            <summary>Что будет, если канал заблокируют?</summary>
+            <div class="cl-faq-answer">
+              Подключение переключится на резервный канал автоматически. Ссылка и настройки остаются
+              прежними — менять ничего не нужно.
+            </div>
+          </details>
+          <details class="cl-faq-item">
+            <summary>Сколько устройств можно подключить?</summary>
+            <div class="cl-faq-answer">
+              На годовом и полугодовом тарифе — 5, на месячном — 3. Считаются одновременные
+              подключения, список устройств виден в боте.
+            </div>
+          </details>
+          <details class="cl-faq-item">
+            <summary>Вы храните историю подключений?</summary>
+            <div class="cl-faq-answer">
+              Нет. Для работы нужны только объём трафика и срок подписки. История сайтов и адресов не
+              пишется.
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <div class="cl-sticky-cta">
+        <div style="flex: 1">
+          <div class="cl-strong cl-numeric">1 490 ₽ / год</div>
+          <div class="cl-small cl-muted">124 ₽ в месяц</div>
+        </div>
+        <button class="cl-btn cl-btn-primary">Оплатить</button>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="cl-container footer-inner">
+        <img src="../assets/logo-lockup-dark.svg" alt="CoreLink" style="height: 22px" />
+        <div class="cl-row" style="gap: var(--cl-space-6)">
+          <a href="#">Оферта</a>
+          <a href="#">Политика данных</a>
+          <a href="#">Поддержка в Telegram</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

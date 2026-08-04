@@ -1,0 +1,312 @@
+/*
+ * CoreLink — токены дизайн-системы.
+ *
+ * Два слоя: палитра (--cl-pine-600) неизменна между темами, семантика
+ * (--cl-primary, --cl-surface) переключается вместе с темой.
+ * В компонентах используем только семантику.
+ *
+ * Тема задаётся явно атрибутом на <html>: без атрибута — светлая,
+ * data-theme="dark" — тёмная. Автоподхвата системной темы нет намеренно:
+ * витрина всегда тёмная, админка всегда светлая, выбор делает приложение.
+ *
+ * Градиентов в системе нет. Цвет плотный: заливка либо есть, либо её нет.
+ * Глубина набирается слоями поверхностей, рамками и воздухом, а не свечением.
+ */
+
+:root {
+  /* --- Палитра: Pine — бренд, действие, «работает» --- */
+
+  --cl-pine-50: #eef6f1;
+  --cl-pine-100: #d7ebe0;
+  --cl-pine-200: #afd7c3;
+  --cl-pine-300: #7fbea1;
+  --cl-pine-400: #4c9f7c;
+  --cl-pine-500: #2a8462;
+  --cl-pine-600: #16684c;
+  --cl-pine-700: #0f5039;
+  --cl-pine-800: #0b3b2a;
+  --cl-pine-900: #07281d;
+  --cl-pine-950: #041a13;
+
+  /* --- Палитра: Amber — выгода, внимание, маркер --- */
+
+  --cl-amber-100: #fdf0d5;
+  --cl-amber-200: #fbe0a8;
+  --cl-amber-300: #f8cc72;
+  --cl-amber-400: #f3b13c;
+  --cl-amber-500: #e0961b;
+  --cl-amber-600: #b87410;
+  --cl-amber-700: #8c560b;
+  --cl-amber-900: #4d3005;
+
+  /* --- Палитра: Rust — ошибка, отказ платежа --- */
+
+  --cl-rust-100: #fbe3dc;
+  --cl-rust-300: #eda994;
+  --cl-rust-400: #e07a5f;
+  --cl-rust-500: #c1442f;
+  --cl-rust-600: #a5341f;
+  --cl-rust-700: #7e2617;
+  --cl-rust-900: #4a1409;
+
+  /* --- Палитра: Paper — тёплые нейтральные --- */
+
+  --cl-paper-0: #ffffff;
+  --cl-paper-25: #fdfcf8;
+  --cl-paper-50: #f7f5ef;
+  --cl-paper-100: #efebe1;
+  --cl-paper-200: #e1dccf;
+  --cl-paper-300: #c8c1ae;
+  --cl-paper-400: #a09884;
+  --cl-paper-500: #756e5c;
+  --cl-paper-600: #545040;
+  --cl-paper-700: #3b382c;
+  --cl-paper-800: #29271f;
+  --cl-paper-900: #1b1a15;
+  --cl-paper-950: #121110;
+
+  /*
+   * Типографика. Serif в заголовках и ценах — сознательный выбор: он читается
+   * как редакция и договор, а не как очередной SaaS-шаблон, и работает на
+   * доверие сильнее любой иллюстрации. Гротеск — весь интерфейсный текст.
+   * Моно — данные: ключи, объёмы, идентификаторы.
+   * В прод шрифты кладём локально, не подключаем со стороннего CDN.
+   */
+
+  --cl-font-display: "Spectral", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --cl-font-sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial,
+    sans-serif;
+  --cl-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --cl-text-2xs: 11px;
+  --cl-text-xs: 12px;
+  --cl-text-sm: 13px;
+  --cl-text-md: 14px;
+  --cl-text-lg: 16px;
+  --cl-text-xl: 19px;
+  --cl-text-2xl: 23px;
+  --cl-text-3xl: 30px;
+  --cl-text-4xl: 40px;
+  --cl-text-5xl: 54px;
+  --cl-text-6xl: 68px;
+
+  --cl-leading-tight: 1.1;
+  --cl-leading-snug: 1.25;
+  --cl-leading-normal: 1.55;
+  --cl-leading-relaxed: 1.7;
+
+  --cl-weight-regular: 400;
+  --cl-weight-medium: 500;
+  --cl-weight-semibold: 600;
+  --cl-weight-bold: 700;
+
+  --cl-tracking-tight: -0.015em;
+  --cl-tracking-normal: 0;
+  --cl-tracking-wide: 0.14em;
+
+  /* --- Отступы: шаг 4px --- */
+
+  --cl-space-1: 4px;
+  --cl-space-2: 8px;
+  --cl-space-3: 12px;
+  --cl-space-4: 16px;
+  --cl-space-5: 20px;
+  --cl-space-6: 24px;
+  --cl-space-8: 32px;
+  --cl-space-10: 40px;
+  --cl-space-12: 48px;
+  --cl-space-16: 64px;
+  --cl-space-20: 80px;
+  --cl-space-24: 96px;
+
+  /* --- Радиусы и рамки: сдержанные, «бумажные» --- */
+
+  --cl-radius-sm: 4px;
+  --cl-radius-md: 6px;
+  --cl-radius-lg: 8px;
+  --cl-radius-xl: 12px;
+  --cl-radius-2xl: 16px;
+  --cl-radius-pill: 999px;
+  --cl-border-width: 1px;
+
+  /* --- Движение --- */
+
+  --cl-duration-fast: 120ms;
+  --cl-duration-base: 180ms;
+  --cl-duration-slow: 260ms;
+  --cl-ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --cl-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* --- Слои --- */
+
+  --cl-z-dropdown: 100;
+  --cl-z-sticky: 200;
+  --cl-z-overlay: 300;
+  --cl-z-modal: 400;
+  --cl-z-toast: 500;
+
+  /* --- Раскладка --- */
+
+  --cl-container: 1120px;
+  --cl-container-narrow: 680px;
+  --cl-tap-target: 44px;
+
+  /*
+   * Высота липкой шапки. Приложение задаёт своё значение — на него
+   * отступает прокрутка к якорю, иначе заголовок секции уезжает под шапку.
+   */
+  --cl-sticky-offset: 0px;
+}
+
+/* --- Светлая тема: админка, документы, письма --- */
+
+:root {
+  --cl-bg: var(--cl-paper-50);
+  --cl-bg-elevated: var(--cl-paper-25);
+  --cl-surface: var(--cl-paper-0);
+  --cl-surface-raised: var(--cl-paper-0);
+  --cl-surface-sunken: var(--cl-paper-50);
+  --cl-surface-hover: var(--cl-paper-50);
+
+  --cl-border: var(--cl-paper-200);
+  --cl-border-strong: var(--cl-paper-300);
+  --cl-border-subtle: var(--cl-paper-100);
+
+  --cl-text: var(--cl-paper-900);
+  --cl-text-secondary: var(--cl-paper-600);
+  --cl-text-muted: var(--cl-paper-500);
+  --cl-text-inverse: var(--cl-paper-25);
+
+  --cl-primary: var(--cl-pine-600);
+  --cl-primary-hover: var(--cl-pine-700);
+  --cl-primary-active: var(--cl-pine-800);
+  --cl-on-primary: var(--cl-paper-25);
+  --cl-primary-soft: var(--cl-pine-50);
+  --cl-primary-soft-fg: var(--cl-pine-700);
+  --cl-link: var(--cl-pine-700);
+
+  /* Плотный тёмно-зелёный блок: секции доверия, футер, шапка письма. */
+  --cl-ink: var(--cl-pine-900);
+  --cl-on-ink: var(--cl-paper-100);
+  --cl-on-ink-muted: var(--cl-pine-200);
+
+  /*
+   * Выделенный тариф — инверсия темы: на светлой странице он тёмный,
+   * на тёмной светлый. Так «вот этот вариант» видно боковым зрением,
+   * и для этого не нужны ни свечение, ни рамка-радуга.
+   */
+  --cl-feature-bg: var(--cl-pine-900);
+  --cl-feature-fg: var(--cl-paper-100);
+  --cl-feature-muted: var(--cl-pine-200);
+  --cl-feature-line: var(--cl-pine-800);
+  --cl-feature-btn-bg: var(--cl-paper-25);
+  --cl-feature-btn-fg: var(--cl-pine-900);
+  --cl-feature-btn-hover: var(--cl-paper-200);
+
+  --cl-accent: var(--cl-amber-500);
+  --cl-accent-marker: var(--cl-amber-300);
+  --cl-on-accent: var(--cl-paper-900);
+
+  --cl-success: var(--cl-pine-600);
+  --cl-success-soft: var(--cl-pine-50);
+  --cl-success-soft-fg: var(--cl-pine-700);
+
+  --cl-warning: var(--cl-amber-700);
+  --cl-warning-soft: var(--cl-amber-100);
+  --cl-warning-soft-fg: var(--cl-amber-900);
+
+  --cl-danger: var(--cl-rust-600);
+  --cl-danger-solid: var(--cl-rust-600);
+  --cl-danger-soft: var(--cl-rust-100);
+  --cl-danger-soft-fg: var(--cl-rust-900);
+
+  --cl-info: var(--cl-pine-700);
+  --cl-info-soft: var(--cl-pine-50);
+  --cl-info-soft-fg: var(--cl-pine-800);
+
+  --cl-focus-ring: var(--cl-amber-500);
+  --cl-overlay: rgba(27, 26, 21, 0.5);
+
+  /*
+   * В светлой теме теней почти нет: карточки держатся рамкой и фоном.
+   * Тень появляется только там, где элемент действительно всплывает.
+   */
+  --cl-shadow-sm: none;
+  --cl-shadow-md: 0 8px 20px -12px rgba(27, 26, 21, 0.25);
+  --cl-shadow-lg: 0 28px 56px -24px rgba(27, 26, 21, 0.3);
+
+  color-scheme: light;
+}
+
+/* --- Тёмная тема: витрина, личный кабинет, мини-апп --- */
+
+[data-theme="dark"] {
+  --cl-bg: var(--cl-paper-950);
+  --cl-bg-elevated: #171612;
+  --cl-surface: #1c1b16;
+  --cl-surface-raised: #24231c;
+  --cl-surface-sunken: #0e0d0c;
+  --cl-surface-hover: #2b291f;
+
+  --cl-border: #33312a;
+  --cl-border-strong: #45423a;
+  --cl-border-subtle: #26241e;
+
+  --cl-text: #f0ebe1;
+  --cl-text-secondary: #b8b2a3;
+  --cl-text-muted: #918b7c;
+  --cl-text-inverse: var(--cl-paper-950);
+
+  /* На тёмном кнопка светлая с тёмным текстом: контраст 8.6:1 и заметнее. */
+  --cl-primary: var(--cl-pine-300);
+  --cl-primary-hover: var(--cl-pine-200);
+  --cl-primary-active: var(--cl-pine-400);
+  --cl-on-primary: var(--cl-pine-950);
+  --cl-primary-soft: rgba(127, 190, 161, 0.14);
+  --cl-primary-soft-fg: var(--cl-pine-300);
+  --cl-link: var(--cl-pine-300);
+
+  /* Чуть светлее фона страницы, иначе «глава» на угольном фоне не читается. */
+  --cl-ink: #0a2c20;
+  --cl-on-ink: var(--cl-paper-100);
+  --cl-on-ink-muted: var(--cl-pine-200);
+
+  --cl-feature-bg: var(--cl-paper-50);
+  --cl-feature-fg: var(--cl-paper-900);
+  --cl-feature-muted: var(--cl-paper-600);
+  --cl-feature-line: var(--cl-paper-300);
+  --cl-feature-btn-bg: var(--cl-pine-700);
+  --cl-feature-btn-fg: var(--cl-paper-25);
+  --cl-feature-btn-hover: var(--cl-pine-800);
+
+  --cl-accent: var(--cl-amber-400);
+  --cl-accent-marker: var(--cl-amber-300);
+  --cl-on-accent: var(--cl-paper-900);
+
+  --cl-success: var(--cl-pine-300);
+  --cl-success-soft: rgba(127, 190, 161, 0.14);
+  --cl-success-soft-fg: var(--cl-pine-200);
+
+  --cl-warning: var(--cl-amber-400);
+  --cl-warning-soft: rgba(243, 177, 60, 0.14);
+  --cl-warning-soft-fg: var(--cl-amber-300);
+
+  /* Текст и рамки — светлый rust, заливка кнопки — тёмный: белый на rust-400 нечитаем. */
+  --cl-danger: var(--cl-rust-400);
+  --cl-danger-solid: var(--cl-rust-600);
+  --cl-danger-soft: rgba(224, 122, 95, 0.14);
+  --cl-danger-soft-fg: var(--cl-rust-300);
+
+  --cl-info: var(--cl-pine-300);
+  --cl-info-soft: rgba(127, 190, 161, 0.14);
+  --cl-info-soft-fg: var(--cl-pine-200);
+
+  --cl-focus-ring: var(--cl-amber-400);
+  --cl-overlay: rgba(8, 7, 6, 0.72);
+
+  --cl-shadow-sm: none;
+  --cl-shadow-md: 0 10px 24px -14px rgba(0, 0, 0, 0.8);
+  --cl-shadow-lg: 0 32px 64px -28px rgba(0, 0, 0, 0.9);
+
+  color-scheme: dark;
+}

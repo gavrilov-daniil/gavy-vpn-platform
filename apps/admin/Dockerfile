@@ -6,8 +6,10 @@ RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
 COPY apps/admin/package.json apps/admin/
+COPY packages/ui/package.json packages/ui/
 RUN pnpm install --frozen-lockfile --filter @corelink/admin...
 
+COPY packages/ui packages/ui
 COPY apps/admin apps/admin
 RUN pnpm --filter @corelink/admin build
 

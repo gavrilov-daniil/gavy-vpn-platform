@@ -1,0 +1,574 @@
+/*
+ * CoreLink — компоненты интерфейса.
+ * Работают в обеих темах: цвета берутся только из семантических токенов.
+ * Заливки плотные, без градиентов и свечения.
+ */
+
+/* --- Кнопки --- */
+
+.cl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cl-space-2);
+  min-height: 38px;
+  padding: 0 var(--cl-space-4);
+  border: var(--cl-border-width) solid var(--cl-border-strong);
+  border-radius: var(--cl-radius-md);
+  background: var(--cl-surface);
+  color: var(--cl-text);
+  font-family: inherit;
+  font-size: var(--cl-text-md);
+  font-weight: var(--cl-weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--cl-duration-fast) var(--cl-ease-out),
+    border-color var(--cl-duration-fast) var(--cl-ease-out),
+    color var(--cl-duration-fast) var(--cl-ease-out);
+}
+
+.cl-btn:hover:not(:disabled) {
+  background: var(--cl-surface-hover);
+  border-color: var(--cl-text-muted);
+}
+
+.cl-btn:disabled,
+.cl-btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cl-btn-primary {
+  background: var(--cl-primary);
+  border-color: var(--cl-primary);
+  color: var(--cl-on-primary);
+}
+
+.cl-btn-primary:hover:not(:disabled) {
+  background: var(--cl-primary-hover);
+  border-color: var(--cl-primary-hover);
+}
+
+.cl-btn-primary:active:not(:disabled) {
+  background: var(--cl-primary-active);
+}
+
+/*
+ * Главное действие экрана. Отличается не эффектом, а весом: та же плотная
+ * заливка бренда, но крупнее и с воздухом вокруг. Второй такой на экране
+ * не ставим — тогда «главное» перестаёт читаться.
+ */
+.cl-btn-cta {
+  background: var(--cl-primary);
+  border-color: var(--cl-primary);
+  color: var(--cl-on-primary);
+  min-height: var(--cl-tap-target);
+  padding-inline: var(--cl-space-6);
+  font-size: var(--cl-text-lg);
+}
+
+.cl-btn-cta:hover:not(:disabled) {
+  background: var(--cl-primary-hover);
+  border-color: var(--cl-primary-hover);
+}
+
+/* Кнопка на плотном тёмно-зелёном блоке: инверсия, чтобы не терялась. */
+.cl-ink-panel .cl-btn-cta,
+.cl-btn-on-ink {
+  background: var(--cl-paper-25);
+  border-color: var(--cl-paper-25);
+  color: var(--cl-pine-900);
+}
+
+.cl-ink-panel .cl-btn-cta:hover:not(:disabled),
+.cl-btn-on-ink:hover:not(:disabled) {
+  background: var(--cl-paper-100);
+  border-color: var(--cl-paper-100);
+}
+
+.cl-btn-danger {
+  background: var(--cl-danger-solid);
+  border-color: var(--cl-danger-solid);
+  color: var(--cl-paper-0);
+}
+
+.cl-btn-danger:hover:not(:disabled) {
+  background: var(--cl-rust-700);
+  border-color: var(--cl-rust-700);
+}
+
+.cl-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--cl-text-secondary);
+  font-weight: var(--cl-weight-medium);
+}
+
+.cl-btn-ghost:hover:not(:disabled) {
+  background: var(--cl-surface-hover);
+  border-color: transparent;
+  color: var(--cl-text);
+}
+
+.cl-btn-sm {
+  min-height: 30px;
+  padding: 0 var(--cl-space-3);
+  font-size: var(--cl-text-sm);
+}
+
+.cl-btn-lg {
+  min-height: var(--cl-tap-target);
+  padding: 0 var(--cl-space-6);
+  font-size: var(--cl-text-lg);
+}
+
+.cl-btn-block {
+  width: 100%;
+}
+
+.cl-btn.is-loading {
+  color: transparent;
+  pointer-events: none;
+  position: relative;
+}
+
+.cl-btn.is-loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  color: var(--cl-on-primary);
+  animation: cl-spin 700ms linear infinite;
+}
+
+.cl-btn-ghost.is-loading::after,
+.cl-btn:not([class*="cl-btn-"]).is-loading::after {
+  color: var(--cl-text);
+}
+
+@keyframes cl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Поля ввода --- */
+
+.cl-field {
+  display: block;
+  margin-bottom: var(--cl-space-3);
+}
+
+.cl-label {
+  display: block;
+  font-size: var(--cl-text-xs);
+  font-weight: var(--cl-weight-semibold);
+  color: var(--cl-text-secondary);
+  margin-bottom: var(--cl-space-1);
+}
+
+.cl-label-required::after {
+  content: " *";
+  color: var(--cl-danger);
+}
+
+.cl-input,
+.cl-select,
+.cl-textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: var(--cl-space-2) var(--cl-space-3);
+  border: var(--cl-border-width) solid var(--cl-border-strong);
+  border-radius: var(--cl-radius-md);
+  background: var(--cl-surface);
+  color: var(--cl-text);
+  font-family: inherit;
+  font-size: var(--cl-text-md);
+  transition: border-color var(--cl-duration-fast) var(--cl-ease-out);
+}
+
+.cl-input::placeholder,
+.cl-textarea::placeholder {
+  color: var(--cl-text-muted);
+}
+
+.cl-input:hover,
+.cl-select:hover,
+.cl-textarea:hover {
+  border-color: var(--cl-text-muted);
+}
+
+.cl-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.cl-input:disabled,
+.cl-select:disabled,
+.cl-textarea:disabled {
+  background: var(--cl-surface-sunken);
+  color: var(--cl-text-muted);
+  cursor: not-allowed;
+}
+
+.cl-input.is-invalid,
+.cl-select.is-invalid,
+.cl-textarea.is-invalid {
+  border-color: var(--cl-danger);
+}
+
+.cl-hint {
+  display: block;
+  font-size: var(--cl-text-xs);
+  color: var(--cl-text-muted);
+  margin-top: var(--cl-space-1);
+}
+
+.cl-error-text {
+  display: block;
+  font-size: var(--cl-text-xs);
+  color: var(--cl-danger);
+  margin-top: var(--cl-space-1);
+}
+
+/* --- Переключатель --- */
+
+.cl-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cl-space-2);
+  cursor: pointer;
+  font-size: var(--cl-text-md);
+}
+
+.cl-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.cl-toggle-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--cl-radius-pill);
+  background: var(--cl-border-strong);
+  transition: background var(--cl-duration-base) var(--cl-ease-out);
+}
+
+.cl-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--cl-paper-0);
+  transition: transform var(--cl-duration-base) var(--cl-ease-out);
+}
+
+.cl-toggle input:checked + .cl-toggle-track {
+  background: var(--cl-primary);
+}
+
+.cl-toggle input:checked + .cl-toggle-track .cl-toggle-thumb {
+  transform: translateX(16px);
+}
+
+.cl-toggle input:focus-visible + .cl-toggle-track {
+  outline: 2px solid var(--cl-focus-ring);
+  outline-offset: 2px;
+}
+
+/* --- Карточка --- */
+
+.cl-card {
+  background: var(--cl-surface);
+  border: var(--cl-border-width) solid var(--cl-border);
+  border-radius: var(--cl-radius-lg);
+  overflow: hidden;
+}
+
+.cl-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cl-space-4);
+  padding: var(--cl-space-4) var(--cl-space-5);
+  border-bottom: var(--cl-border-width) solid var(--cl-border);
+}
+
+.cl-card-title {
+  font-family: var(--cl-font-display);
+  font-size: var(--cl-text-lg);
+  font-weight: var(--cl-weight-semibold);
+}
+
+.cl-card-subtitle {
+  font-size: var(--cl-text-xs);
+  color: var(--cl-text-muted);
+  margin-top: var(--cl-space-1);
+}
+
+.cl-card-body {
+  padding: var(--cl-space-5);
+}
+
+.cl-card-footer {
+  padding: var(--cl-space-3) var(--cl-space-5);
+  border-top: var(--cl-border-width) solid var(--cl-border);
+  background: var(--cl-surface-sunken);
+}
+
+/* --- Бейджи и статусы --- */
+
+.cl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cl-space-2);
+  padding: 2px var(--cl-space-2);
+  border-radius: var(--cl-radius-sm);
+  font-family: var(--cl-font-mono);
+  font-size: var(--cl-text-2xs);
+  font-weight: var(--cl-weight-medium);
+  white-space: nowrap;
+  background: var(--cl-surface-sunken);
+  color: var(--cl-text-secondary);
+  border: var(--cl-border-width) solid var(--cl-border);
+}
+
+.cl-badge-success {
+  background: var(--cl-success-soft);
+  color: var(--cl-success-soft-fg);
+  border-color: transparent;
+}
+
+.cl-badge-warning {
+  background: var(--cl-warning-soft);
+  color: var(--cl-warning-soft-fg);
+  border-color: transparent;
+}
+
+.cl-badge-danger {
+  background: var(--cl-danger-soft);
+  color: var(--cl-danger-soft-fg);
+  border-color: transparent;
+}
+
+.cl-badge-info {
+  background: var(--cl-info-soft);
+  color: var(--cl-info-soft-fg);
+  border-color: transparent;
+}
+
+/* Точка-статус: цвет дублируется текстом рядом, цветом одним не сообщаем. */
+.cl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cl-text-muted);
+  flex-shrink: 0;
+}
+
+.cl-dot-success {
+  background: var(--cl-success);
+}
+
+.cl-dot-warning {
+  background: var(--cl-warning);
+}
+
+.cl-dot-danger {
+  background: var(--cl-danger);
+}
+
+/* --- Уведомления --- */
+
+.cl-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cl-space-3);
+  padding: var(--cl-space-3) var(--cl-space-4);
+  border-radius: var(--cl-radius-md);
+  border: var(--cl-border-width) solid transparent;
+  font-size: var(--cl-text-md);
+}
+
+.cl-alert-info {
+  background: var(--cl-info-soft);
+  color: var(--cl-info-soft-fg);
+  border-color: var(--cl-info-soft-fg);
+}
+
+.cl-alert-success {
+  background: var(--cl-success-soft);
+  color: var(--cl-success-soft-fg);
+  border-color: var(--cl-success);
+}
+
+.cl-alert-warning {
+  background: var(--cl-warning-soft);
+  color: var(--cl-warning-soft-fg);
+  border-color: var(--cl-warning);
+}
+
+.cl-alert-danger {
+  background: var(--cl-danger-soft);
+  color: var(--cl-danger-soft-fg);
+  border-color: var(--cl-danger);
+}
+
+.cl-alert-body {
+  flex: 1;
+}
+
+/* --- Таблица --- */
+
+.cl-table-wrap {
+  overflow-x: auto;
+}
+
+.cl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--cl-text-sm);
+}
+
+.cl-table th,
+.cl-table td {
+  text-align: left;
+  padding: var(--cl-space-3) var(--cl-space-5);
+  border-bottom: var(--cl-border-width) solid var(--cl-border-subtle);
+  vertical-align: top;
+}
+
+.cl-table th {
+  color: var(--cl-text-muted);
+  font-family: var(--cl-font-mono);
+  font-size: var(--cl-text-2xs);
+  font-weight: var(--cl-weight-medium);
+  letter-spacing: var(--cl-tracking-wide);
+  text-transform: uppercase;
+  white-space: nowrap;
+  border-bottom-color: var(--cl-border-strong);
+}
+
+.cl-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.cl-table tbody tr:hover {
+  background: var(--cl-surface-hover);
+}
+
+/* --- Пары ключ-значение --- */
+
+.cl-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--cl-space-3);
+}
+
+.cl-kv-key {
+  font-size: var(--cl-text-xs);
+  color: var(--cl-text-muted);
+}
+
+.cl-kv-value {
+  font-size: var(--cl-text-md);
+}
+
+/* --- Модальное окно --- */
+
+.cl-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--cl-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--cl-space-4);
+  z-index: var(--cl-z-modal);
+}
+
+.cl-modal {
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--cl-surface-raised);
+  border: var(--cl-border-width) solid var(--cl-border);
+  border-radius: var(--cl-radius-xl);
+  box-shadow: var(--cl-shadow-lg);
+}
+
+/* --- Загрузка и пустые состояния --- */
+
+.cl-skeleton {
+  background: var(--cl-surface-sunken);
+  border-radius: var(--cl-radius-sm);
+  height: 14px;
+  animation: cl-pulse 1.6s var(--cl-ease-in-out) infinite;
+}
+
+@keyframes cl-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.cl-empty {
+  padding: var(--cl-space-10) var(--cl-space-4);
+  text-align: center;
+}
+
+.cl-empty-title {
+  font-family: var(--cl-font-display);
+  font-size: var(--cl-text-lg);
+}
+
+.cl-empty-hint {
+  margin-top: var(--cl-space-1);
+  font-size: var(--cl-text-xs);
+  color: var(--cl-text-muted);
+}
+
+/* --- Иконки --- */
+
+.cl-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cl-icon-lg {
+  width: 24px;
+  height: 24px;
+}
+
+/*
+ * Иконка из файла без инлайна SVG: маска красится currentColor.
+ * <span class="cl-icon cl-icon-mask" style="--cl-icon: url(.../lock.svg)"></span>
+ * В React-приложениях предпочтительнее инлайн-SVG с классом .cl-icon.
+ */
+.cl-icon-mask {
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask: var(--cl-icon) center / contain no-repeat;
+  mask: var(--cl-icon) center / contain no-repeat;
+}

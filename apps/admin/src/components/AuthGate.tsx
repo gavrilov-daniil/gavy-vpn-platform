@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import logoLight from "@corelink/ui/assets/logo-lockup.svg";
 import {
   ApiError,
   clearAdminToken,
@@ -68,13 +69,18 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (!me) {
     return (
       <div className="login-screen">
-        <LoginScreen
+        <div>
+          <div className="login-brand">
+            <img src={logoLight} alt="CoreLink" />
+          </div>
+          <LoginScreen
           initialError={error}
-          onToken={(token) => {
-            setAdminToken(token);
-            void load();
-          }}
-        />
+            onToken={(token) => {
+              setAdminToken(token);
+              void load();
+            }}
+          />
+        </div>
       </div>
     );
   }
@@ -113,7 +119,7 @@ function LoginScreen({ onToken, initialError }: { onToken: (token: string) => vo
   return (
     <form className="card login-card" onSubmit={submitPassword}>
       <div className="card-head">
-        <div className="card-title">CoreLink</div>
+        <div className="card-title">Вход в панель</div>
       </div>
       <div className="card-body">
         {error && <ErrorBox error={error} />}

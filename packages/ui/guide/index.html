@@ -1,0 +1,1182 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CoreLink — дизайн-система</title>
+    <link rel="icon" href="../assets/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../src/index.css" />
+    <style>
+      :root {
+        --cl-sticky-offset: 56px;
+      }
+
+      .guide-nav {
+        position: sticky;
+        top: 0;
+        z-index: var(--cl-z-sticky);
+        background: var(--cl-bg);
+        border-bottom: 1px solid var(--cl-border);
+      }
+
+      .guide-nav-inner {
+        display: flex;
+        align-items: center;
+        gap: var(--cl-space-4);
+        padding-block: var(--cl-space-3);
+      }
+
+      .guide-nav a {
+        color: var(--cl-text-secondary);
+        font-size: var(--cl-text-sm);
+      }
+
+      .guide-logo {
+        height: 26px;
+      }
+
+      .guide-section {
+        padding-block: var(--cl-space-16);
+        border-bottom: 1px solid var(--cl-border);
+      }
+
+      .guide-section > h2 {
+        font-size: var(--cl-text-3xl);
+        margin-bottom: var(--cl-space-3);
+      }
+
+      .guide-section > .cl-secondary {
+        max-width: 660px;
+        margin-bottom: var(--cl-space-8);
+        font-size: var(--cl-text-lg);
+      }
+
+      .guide-block {
+        margin-top: var(--cl-space-10);
+      }
+
+      .guide-block h3 {
+        font-family: var(--cl-font-mono);
+        font-size: var(--cl-text-xs);
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: var(--cl-tracking-wide);
+        color: var(--cl-text-muted);
+        padding-bottom: var(--cl-space-2);
+        border-bottom: 1px solid var(--cl-border);
+        margin-bottom: var(--cl-space-5);
+      }
+
+      .guide-demo {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--cl-space-3);
+        padding: var(--cl-space-5);
+        border: 1px solid var(--cl-border);
+        border-radius: var(--cl-radius-lg);
+        background: var(--cl-surface);
+      }
+
+      .guide-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: var(--cl-space-4);
+      }
+
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+        gap: var(--cl-space-2);
+      }
+
+      .swatch-chip {
+        height: 64px;
+        border-radius: var(--cl-radius-sm);
+        border: 1px solid var(--cl-border);
+      }
+
+      .swatch-meta {
+        padding-top: var(--cl-space-2);
+        font-size: var(--cl-text-2xs);
+        font-family: var(--cl-font-mono);
+        color: var(--cl-text-muted);
+      }
+
+      .token-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--cl-text-sm);
+      }
+
+      .token-table th,
+      .token-table td {
+        text-align: left;
+        padding: var(--cl-space-2) var(--cl-space-3);
+        border-bottom: 1px solid var(--cl-border-subtle);
+        vertical-align: middle;
+      }
+
+      .token-table th {
+        font-family: var(--cl-font-mono);
+        font-size: var(--cl-text-2xs);
+        text-transform: uppercase;
+        letter-spacing: var(--cl-tracking-wide);
+        color: var(--cl-text-muted);
+        font-weight: 500;
+        border-bottom-color: var(--cl-border-strong);
+      }
+
+      .token-table code {
+        font-family: var(--cl-font-mono);
+        font-size: var(--cl-text-xs);
+        color: var(--cl-text-secondary);
+      }
+
+      .rule-cols {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--cl-space-5);
+      }
+
+      .rule h4 {
+        font-family: var(--cl-font-mono);
+        font-size: var(--cl-text-xs);
+        text-transform: uppercase;
+        letter-spacing: var(--cl-tracking-wide);
+        padding-bottom: var(--cl-space-2);
+        margin-bottom: var(--cl-space-3);
+        border-bottom: 2px solid currentColor;
+      }
+
+      .rule-do h4 {
+        color: var(--cl-primary);
+      }
+
+      .rule-dont h4 {
+        color: var(--cl-danger);
+      }
+
+      .rule ul {
+        margin: 0;
+        padding-left: var(--cl-space-5);
+        font-size: var(--cl-text-md);
+        color: var(--cl-text-secondary);
+        display: flex;
+        flex-direction: column;
+        gap: var(--cl-space-2);
+      }
+
+      .space-bar {
+        background: var(--cl-primary);
+        height: 12px;
+      }
+
+      .logo-box {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 128px;
+        padding: var(--cl-space-5);
+        border: 1px solid var(--cl-border);
+        border-radius: var(--cl-radius-lg);
+      }
+
+      .logo-box-dark {
+        background: var(--cl-pine-900);
+        color: var(--cl-paper-25);
+        border-color: var(--cl-pine-900);
+      }
+
+      .logo-box-light {
+        background: var(--cl-paper-0);
+        color: var(--cl-paper-900);
+      }
+
+      .logo-box-amber {
+        background: var(--cl-amber-300);
+        color: var(--cl-paper-900);
+        border-color: var(--cl-amber-300);
+      }
+
+      .icon-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: var(--cl-space-3);
+      }
+
+      .icon-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--cl-space-2);
+        padding: var(--cl-space-4) var(--cl-space-2);
+        border: 1px solid var(--cl-border);
+        border-radius: var(--cl-radius-md);
+        font-family: var(--cl-font-mono);
+        font-size: var(--cl-text-2xs);
+        color: var(--cl-text-muted);
+        background: var(--cl-surface);
+      }
+
+      .decision {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0;
+        border-top: 1px solid var(--cl-border);
+      }
+
+      .decision-row {
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        gap: var(--cl-space-6);
+        padding-block: var(--cl-space-5);
+        border-bottom: 1px solid var(--cl-border);
+      }
+
+      .decision-row h4 {
+        font-size: var(--cl-text-lg);
+      }
+
+      .decision-row p {
+        color: var(--cl-text-secondary);
+        max-width: 640px;
+      }
+
+      @media (max-width: 720px) {
+        .rule-cols,
+        .decision-row {
+          grid-template-columns: 1fr;
+          gap: var(--cl-space-3);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="guide-nav">
+      <div class="cl-container guide-nav-inner">
+        <img class="guide-logo" id="nav-logo" src="../assets/logo-lockup.svg" alt="CoreLink" />
+        <nav class="cl-row" style="gap: var(--cl-space-4); flex: 1">
+          <a href="#principles">Принципы</a>
+          <a href="#decisions">Решения</a>
+          <a href="#logo">Логотип</a>
+          <a href="#color">Цвет</a>
+          <a href="#type">Типографика</a>
+          <a href="#layout">Сетка</a>
+          <a href="#components">Компоненты</a>
+          <a href="#sales">Витрина</a>
+          <a href="storefront.html">Прототип →</a>
+        </nav>
+        <button class="cl-btn cl-btn-sm" id="theme-toggle" type="button">Тёмная тема</button>
+      </div>
+    </header>
+
+    <main class="cl-container">
+      <section class="guide-section">
+        <p class="cl-eyebrow">CoreLink Design System v1</p>
+        <h1 class="cl-display" style="margin-top: var(--cl-space-4); max-width: 800px">
+          Интерфейс, которому <span class="cl-marker">верят</span> настолько, что платят
+        </h1>
+        <p class="cl-lede" style="margin-top: var(--cl-space-5); max-width: 620px">
+          Одна система токенов для админки и клиентских интерфейсов: две темы, одна палитра, один
+          набор компонентов. Витрина и кабинет — тёмная тема, админка — светлая.
+        </p>
+        <div class="cl-row" style="margin-top: var(--cl-space-6)">
+          <span class="cl-badge">packages/ui</span>
+          <span class="cl-badge">CSS-переменные, без сборки</span>
+          <span class="cl-badge">Префикс классов cl-</span>
+        </div>
+      </section>
+
+      <section class="guide-section" id="principles">
+        <p class="cl-eyebrow">01 — Принципы</p>
+        <h2>О чём система</h2>
+        <p class="cl-secondary">
+          Доверие в этом продукте не рисуется картинками — оно складывается из того, что человек
+          заранее знает, сколько спишут, что будет дальше и куда писать, если сломается.
+        </p>
+        <div class="guide-grid">
+          <div class="cl-card">
+            <div class="cl-card-body">
+              <p class="cl-strong">Цена без сюрпризов</p>
+              <p class="cl-secondary" style="margin-top: var(--cl-space-2)">
+                Рядом с ценой всегда период и итоговая сумма. Никаких «от», сносок и звёздочек.
+                Автосписаний нет — говорим об этом прямо у кнопки.
+              </p>
+            </div>
+          </div>
+          <div class="cl-card">
+            <div class="cl-card-body">
+              <p class="cl-strong">Одно главное действие</p>
+              <p class="cl-secondary" style="margin-top: var(--cl-space-2)">
+                На экране одна кнопка <code class="cl-mono">cl-btn-cta</code>. Всё остальное —
+                вторичные и ghost. Два равнозначных призыва снижают конверсию обоих.
+              </p>
+            </div>
+          </div>
+          <div class="cl-card">
+            <div class="cl-card-body">
+              <p class="cl-strong">Обещание рядом с риском</p>
+              <p class="cl-secondary" style="margin-top: var(--cl-space-2)">
+                Гарантия возврата, способы оплаты и «доступ откроется автоматически» стоят в том же
+                экране, что и оплата, а не в футере.
+              </p>
+            </div>
+          </div>
+          <div class="cl-card">
+            <div class="cl-card-body">
+              <p class="cl-strong">Статус всегда виден</p>
+              <p class="cl-secondary" style="margin-top: var(--cl-space-2)">
+                Подписка, срок, трафик, состояние узла — на первом экране, без переходов. Цветом
+                одним ничего не сообщаем: рядом с точкой всегда текст.
+              </p>
+            </div>
+          </div>
+          <div class="cl-card">
+            <div class="cl-card-body">
+              <p class="cl-strong">Ошибка говорит, что делать</p>
+              <p class="cl-secondary" style="margin-top: var(--cl-space-2)">
+                «Платёж не прошёл» — плохо. «Банк отклонил платёж. Попробуйте другую карту или СБП —
+                деньги не списаны» — хорошо.
+              </p>
+            </div>
+          </div>
+          <div class="cl-card">
+            <div class="cl-card-body">
+              <p class="cl-strong">Спокойный тон</p>
+              <p class="cl-secondary" style="margin-top: var(--cl-space-2)">
+                Ни таймеров обратного отсчёта, ни «осталось 2 места». Продукт про безопасность:
+                давление читается как обман.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section" id="decisions">
+        <p class="cl-eyebrow">02 — Решения</p>
+        <h2>Почему система выглядит так</h2>
+        <p class="cl-secondary">
+          Семь решений, принятых сознательно. Каждое отвечает на вопрос «как это влияет на решение
+          купить», а не «как это модно».
+        </p>
+        <div class="decision">
+          <div class="decision-row">
+            <h4>Хвойный, не синий</h4>
+            <p>
+              Синий — цвет по умолчанию у половины сервисов, он не запоминается. Основной цвет
+              CoreLink — плотный хвойный <code class="cl-mono">#16684C</code>: он читается как
+              «деньги в порядке, доступ работает» и держит контраст 6.7:1 с белым текстом.
+            </p>
+          </div>
+          <div class="decision-row">
+            <h4>Тёплая бумага вместо серого</h4>
+            <p>
+              Нейтральные тона тёплые, кремовые (<code class="cl-mono">#F7F5EF</code>), а тёмная тема
+              построена на тёплом угле (<code class="cl-mono">#121110</code>), а не на сине-чёрном.
+              Тёплый фон снимает «серверную» холодность и продлевает время чтения.
+            </p>
+          </div>
+          <div class="decision-row">
+            <h4>Ноль градиентов</h4>
+            <p>
+              Заливка либо есть, либо её нет. Градиенты и свечения — самый быстрый способ выглядеть
+              как шаблон и как «стартап на неделю». Глубина набирается слоями поверхностей, рамками и
+              воздухом.
+            </p>
+          </div>
+          <div class="decision-row">
+            <h4>Serif в заголовках и ценах</h4>
+            <p>
+              Spectral в заголовках и суммах даёт интонацию договора и редакции. Гротеск в интерфейсе
+              (Manrope) остаётся нейтральным, моно (IBM Plex Mono) маркирует данные: ключи, объёмы,
+              даты.
+            </p>
+          </div>
+          <div class="decision-row">
+            <h4>Янтарь — только выгода</h4>
+            <p>
+              Единственный тёплый акцент отвечает за экономию, срок и маркер в заголовке. Его мало,
+              поэтому он работает: увидев янтарь, человек знает — здесь про деньги в его пользу.
+            </p>
+          </div>
+          <div class="decision-row">
+            <h4>Тёмный блок как «глава»</h4>
+            <p>
+              Плотная хвойная плашка <code class="cl-mono">.cl-ink-panel</code> делит витрину на
+              главы и держит внимание на доказательствах и на рекомендованном тарифе. Именно она, а
+              не рамка со свечением, показывает «вот этот вариант».
+            </p>
+          </div>
+          <div class="decision-row">
+            <h4>Тени почти нет</h4>
+            <p>
+              В светлой теме карточки держатся рамкой и фоном. Тень появляется только у того, что
+              действительно всплывает над страницей: модалка, меню. Плоскость читается как
+              аккуратность.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section" id="logo">
+        <p class="cl-eyebrow">03 — Логотип</p>
+        <h2>Знак и лок</h2>
+        <p class="cl-secondary">
+          Разомкнутое кольцо и узел, замыкающий связь: буква C и соединение одновременно. Кольцо —
+          хвойное, узел — янтарный: «канал есть, он живой». Никаких градиентов и свечений.
+        </p>
+
+        <div class="guide-block">
+          <h3>Знак</h3>
+          <div class="guide-grid">
+            <div class="logo-box logo-box-light" style="min-height: 200px">
+              <img src="../assets/logo-mark-color.svg" alt="Знак CoreLink" style="width: 132px" />
+            </div>
+            <div class="logo-box logo-box-dark" style="min-height: 200px">
+              <img src="../assets/logo-mark.svg" alt="Знак CoreLink" style="width: 132px" />
+            </div>
+            <div class="logo-box logo-box-amber" style="min-height: 200px">
+              <img src="../assets/logo-mark.svg" alt="Знак CoreLink" style="width: 132px" />
+            </div>
+          </div>
+          <p class="cl-small cl-muted" style="margin-top: var(--cl-space-3)">
+            На тёмном и на янтарном знак одноцветный: <code class="cl-mono">logo-mark.svg</code>
+            наследует цвет текста через <code class="cl-mono">currentColor</code>.
+          </p>
+        </div>
+
+        <div class="guide-block">
+          <h3>Версии лока</h3>
+          <div class="guide-grid">
+            <div>
+              <div class="logo-box logo-box-light">
+                <img src="../assets/logo-lockup.svg" alt="CoreLink" style="height: 30px" />
+              </div>
+              <p class="cl-small cl-muted" style="margin-top: var(--cl-space-2)">
+                logo-lockup.svg — основной, на светлом
+              </p>
+            </div>
+            <div>
+              <div class="logo-box logo-box-dark">
+                <img src="../assets/logo-lockup-dark.svg" alt="CoreLink" style="height: 30px" />
+              </div>
+              <p class="cl-small cl-muted" style="margin-top: var(--cl-space-2)">
+                logo-lockup-dark.svg — на тёмном
+              </p>
+            </div>
+            <div>
+              <div class="logo-box logo-box-amber">
+                <img src="../assets/logo-lockup-mono.svg" alt="CoreLink" style="height: 30px" />
+              </div>
+              <p class="cl-small cl-muted" style="margin-top: var(--cl-space-2)">
+                logo-lockup-mono.svg — одноцветный: печать, фирменный фон, водяной знак
+              </p>
+            </div>
+            <div>
+              <div class="logo-box logo-box-light" style="gap: var(--cl-space-6)">
+                <img src="../assets/favicon.svg" alt="Фавикон" style="width: 40px" />
+                <img
+                  src="../assets/app-icon.svg"
+                  alt="Иконка приложения"
+                  style="width: 64px; border-radius: 14px"
+                />
+              </div>
+              <p class="cl-small cl-muted" style="margin-top: var(--cl-space-2)">
+                favicon (32px) и app-icon (512px, аватар бота)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Правила</h3>
+          <div class="rule-cols">
+            <div class="rule rule-do">
+              <h4>Можно</h4>
+              <ul>
+                <li>Охранное поле вокруг лока — не меньше высоты знака.</li>
+                <li>Минимальный размер: знак 20px, лок 120px по ширине.</li>
+                <li>На фото — одноцветная версия на плотной плашке.</li>
+                <li>Узел янтарный или в цвет текста — других вариантов нет.</li>
+              </ul>
+            </div>
+            <div class="rule rule-dont">
+              <h4>Нельзя</h4>
+              <ul>
+                <li>Градиенты, тени, обводки, наклон и растяжение.</li>
+                <li>Ставить знак и слово «CoreLink» рядом вручную — только готовый лок.</li>
+                <li>Набирать «CoreLink» гротеском: вордмарк всегда serif.</li>
+                <li>Использовать знак как иконку статуса: у статусов свои точки.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section" id="color">
+        <p class="cl-eyebrow">04 — Цвет</p>
+        <h2>Палитра</h2>
+        <p class="cl-secondary">
+          Четыре ряда: хвойный — бренд и «работает», янтарь — выгода и внимание, ржавый — ошибки,
+          бумага — всё остальное. В компонентах используем только семантические роли.
+        </p>
+
+        <div class="guide-block">
+          <h3>Pine — бренд, действие, «работает»</h3>
+          <div class="swatches">
+            <div><div class="swatch-chip" style="background: var(--cl-pine-50)"></div><div class="swatch-meta">50 · #EEF6F1</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-100)"></div><div class="swatch-meta">100 · #D7EBE0</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-200)"></div><div class="swatch-meta">200 · #AFD7C3</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-300)"></div><div class="swatch-meta">300 · #7FBEA1</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-400)"></div><div class="swatch-meta">400 · #4C9F7C</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-500)"></div><div class="swatch-meta">500 · #2A8462</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-600)"></div><div class="swatch-meta">600 · #16684C</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-700)"></div><div class="swatch-meta">700 · #0F5039</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-800)"></div><div class="swatch-meta">800 · #0B3B2A</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-900)"></div><div class="swatch-meta">900 · #07281D</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-pine-950)"></div><div class="swatch-meta">950 · #041A13</div></div>
+          </div>
+          <p class="cl-small cl-muted" style="margin-top: var(--cl-space-3)">
+            600 — кнопка в светлой теме (белый текст, 6.7:1). 300 — кнопка в тёмной теме, текст на
+            ней тёмный (8.6:1). 900 — «главы» и рекомендованный тариф.
+          </p>
+        </div>
+
+        <div class="guide-block">
+          <h3>Amber — выгода, срок, маркер</h3>
+          <div class="swatches">
+            <div><div class="swatch-chip" style="background: var(--cl-amber-100)"></div><div class="swatch-meta">100 · #FDF0D5</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-amber-200)"></div><div class="swatch-meta">200 · #FBE0A8</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-amber-300)"></div><div class="swatch-meta">300 · маркер</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-amber-400)"></div><div class="swatch-meta">400 · #F3B13C</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-amber-500)"></div><div class="swatch-meta">500 · #E0961B</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-amber-600)"></div><div class="swatch-meta">600 · #B87410</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-amber-700)"></div><div class="swatch-meta">700 · #8C560B</div></div>
+          </div>
+          <p class="cl-small cl-muted" style="margin-top: var(--cl-space-3)">
+            Янтарь никогда не заливает кнопку действия — иначе он перестаёт означать «выгода».
+          </p>
+        </div>
+
+        <div class="guide-block">
+          <h3>Rust и Paper</h3>
+          <div class="swatches">
+            <div><div class="swatch-chip" style="background: var(--cl-rust-400)"></div><div class="swatch-meta">rust-400</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-rust-600)"></div><div class="swatch-meta">rust-600</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-paper-50)"></div><div class="swatch-meta">paper-50</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-paper-200)"></div><div class="swatch-meta">paper-200</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-paper-400)"></div><div class="swatch-meta">paper-400</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-paper-500)"></div><div class="swatch-meta">paper-500</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-paper-700)"></div><div class="swatch-meta">paper-700</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-paper-900)"></div><div class="swatch-meta">paper-900</div></div>
+            <div><div class="swatch-chip" style="background: var(--cl-paper-950)"></div><div class="swatch-meta">paper-950</div></div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Роли (переключаются вместе с темой)</h3>
+          <table class="token-table">
+            <thead>
+              <tr>
+                <th>Токен</th>
+                <th>Где применяется</th>
+                <th style="width: 80px">Светлая</th>
+                <th style="width: 80px">Тёмная</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>--cl-bg</code></td>
+                <td>Фон страницы</td>
+                <td><span style="display: block; height: 20px; background: #f7f5ef; border: 1px solid var(--cl-border)"></span></td>
+                <td><span style="display: block; height: 20px; background: #121110"></span></td>
+              </tr>
+              <tr>
+                <td><code>--cl-surface</code></td>
+                <td>Карточки, таблицы, панели</td>
+                <td><span style="display: block; height: 20px; background: #fff; border: 1px solid var(--cl-border)"></span></td>
+                <td><span style="display: block; height: 20px; background: #1c1b16"></span></td>
+              </tr>
+              <tr>
+                <td><code>--cl-primary</code></td>
+                <td>Кнопка действия, активная навигация</td>
+                <td><span style="display: block; height: 20px; background: #16684c"></span></td>
+                <td><span style="display: block; height: 20px; background: #7fbea1"></span></td>
+              </tr>
+              <tr>
+                <td><code>--cl-ink</code></td>
+                <td>Плотная «глава», рекомендованный тариф, футер</td>
+                <td><span style="display: block; height: 20px; background: #07281d"></span></td>
+                <td><span style="display: block; height: 20px; background: #041a13"></span></td>
+              </tr>
+              <tr>
+                <td><code>--cl-accent</code></td>
+                <td>Выгода, маркер, фокус</td>
+                <td><span style="display: block; height: 20px; background: #e0961b"></span></td>
+                <td><span style="display: block; height: 20px; background: #f3b13c"></span></td>
+              </tr>
+              <tr>
+                <td><code>--cl-text</code> / <code>--cl-text-muted</code></td>
+                <td>Основной и второстепенный текст</td>
+                <td><span style="display: block; height: 20px; background: linear-gradient(90deg, #1b1a15 50%, #756e5c 50%)"></span></td>
+                <td><span style="display: block; height: 20px; background: linear-gradient(90deg, #f0ebe1 50%, #918b7c 50%)"></span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="guide-section" id="type">
+        <p class="cl-eyebrow">05 — Типографика</p>
+        <h2>Три гарнитуры, три роли</h2>
+        <p class="cl-secondary">
+          Spectral — заголовки, цены, цитаты. Manrope — весь интерфейсный текст. IBM Plex Mono —
+          данные, статусы, шапки таблиц. В прод шрифты кладём локально, не подключаем со стороннего
+          CDN.
+        </p>
+        <div class="cl-card">
+          <div class="cl-card-body cl-stack" style="gap: var(--cl-space-6)">
+            <div>
+              <p class="cl-display">Интернет без границ</p>
+              <p class="cl-small cl-muted">.cl-display — Spectral 54/1.1/600</p>
+            </div>
+            <div>
+              <p class="cl-h1">Заголовок раздела</p>
+              <p class="cl-small cl-muted">.cl-h1 — Spectral 30/600</p>
+            </div>
+            <div>
+              <p class="cl-h2">Заголовок страницы админки</p>
+              <p class="cl-small cl-muted">.cl-h2 — Spectral 23/600</p>
+            </div>
+            <div>
+              <p class="cl-lede">Подзаголовок под главным заголовком: объясняет выгоду одним предложением.</p>
+              <p class="cl-small cl-muted">.cl-lede — Manrope 19/1.7, вторичный цвет</p>
+            </div>
+            <div>
+              <p>Основной текст интерфейса — Manrope 14px, межстрочный 1.55.</p>
+              <p class="cl-small cl-muted">body</p>
+            </div>
+            <div>
+              <p class="cl-eyebrow">06 — Тарифы</p>
+              <p class="cl-small cl-muted">.cl-eyebrow — IBM Plex Mono 12/uppercase с линейкой</p>
+            </div>
+            <div>
+              <p class="cl-numeric" style="font-size: var(--cl-text-lg)">1 490 ₽ · 128.4 ГБ · 12.08.2026</p>
+              <p class="cl-small cl-muted">.cl-numeric — IBM Plex Mono, табличные цифры</p>
+            </div>
+            <div>
+              <p style="font-family: var(--cl-font-display); font-size: var(--cl-text-3xl); font-weight: 600">
+                Доверие — это <span class="cl-marker">предсказуемость</span>
+              </p>
+              <p class="cl-small cl-muted">.cl-marker — янтарная плашка, одно слово на экран</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section" id="layout">
+        <p class="cl-eyebrow">06 — Сетка</p>
+        <h2>Отступы, радиусы, тени</h2>
+        <p class="cl-secondary">
+          Шаг сетки — 4px. Радиусы сдержанные: 4–12px, ничего «капсульного», кроме тумблера.
+        </p>
+
+        <div class="guide-block">
+          <h3>Отступы</h3>
+          <table class="token-table">
+            <tbody>
+              <tr><td><code>--cl-space-1</code></td><td>4px</td><td><div class="space-bar" style="width: 4px"></div></td><td class="cl-muted">внутри бейджа</td></tr>
+              <tr><td><code>--cl-space-2</code></td><td>8px</td><td><div class="space-bar" style="width: 8px"></div></td><td class="cl-muted">иконка и текст</td></tr>
+              <tr><td><code>--cl-space-3</code></td><td>12px</td><td><div class="space-bar" style="width: 12px"></div></td><td class="cl-muted">между кнопками</td></tr>
+              <tr><td><code>--cl-space-5</code></td><td>20px</td><td><div class="space-bar" style="width: 20px"></div></td><td class="cl-muted">внутри карточки</td></tr>
+              <tr><td><code>--cl-space-6</code></td><td>24px</td><td><div class="space-bar" style="width: 24px"></div></td><td class="cl-muted">между карточками</td></tr>
+              <tr><td><code>--cl-space-16</code></td><td>64px</td><td><div class="space-bar" style="width: 64px"></div></td><td class="cl-muted">между секциями гайда</td></tr>
+              <tr><td><code>--cl-space-20</code></td><td>80px</td><td><div class="space-bar" style="width: 80px"></div></td><td class="cl-muted">секции витрины</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="guide-block">
+          <h3>Радиусы и тени</h3>
+          <div class="guide-demo">
+            <div style="width: 84px; height: 56px; background: var(--cl-primary-soft); border-radius: var(--cl-radius-sm); display: grid; place-items: center; font-size: 12px">4</div>
+            <div style="width: 84px; height: 56px; background: var(--cl-primary-soft); border-radius: var(--cl-radius-md); display: grid; place-items: center; font-size: 12px">6</div>
+            <div style="width: 84px; height: 56px; background: var(--cl-primary-soft); border-radius: var(--cl-radius-lg); display: grid; place-items: center; font-size: 12px">8</div>
+            <div style="width: 84px; height: 56px; background: var(--cl-primary-soft); border-radius: var(--cl-radius-xl); display: grid; place-items: center; font-size: 12px">12</div>
+            <div style="width: 150px; height: 56px; background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: var(--cl-radius-lg); box-shadow: var(--cl-shadow-md); display: grid; place-items: center; font-size: 12px">shadow-md</div>
+            <div style="width: 150px; height: 56px; background: var(--cl-surface); border: 1px solid var(--cl-border); border-radius: var(--cl-radius-lg); box-shadow: var(--cl-shadow-lg); display: grid; place-items: center; font-size: 12px">shadow-lg</div>
+          </div>
+          <p class="cl-small cl-muted" style="margin-top: var(--cl-space-2)">
+            <code class="cl-mono">--cl-shadow-sm</code> равен <code class="cl-mono">none</code>
+            намеренно: карточки не «висят». Тень — только у модалок и меню.
+          </p>
+        </div>
+      </section>
+
+      <section class="guide-section" id="components">
+        <p class="cl-eyebrow">07 — Компоненты</p>
+        <h2>Интерфейсные блоки</h2>
+        <p class="cl-secondary">
+          Один класс — один компонент, модификаторы через суффикс. Состояния —
+          <code class="cl-mono">.is-loading</code>, <code class="cl-mono">.is-invalid</code>,
+          <code class="cl-mono">.is-featured</code>, остальное через нативные атрибуты.
+        </p>
+
+        <div class="guide-block">
+          <h3>Кнопки</h3>
+          <div class="guide-demo">
+            <button class="cl-btn cl-btn-cta">Оплатить 1 490 ₽</button>
+            <button class="cl-btn cl-btn-primary">Сохранить</button>
+            <button class="cl-btn">Вторичная</button>
+            <button class="cl-btn cl-btn-ghost">Отмена</button>
+            <button class="cl-btn cl-btn-danger">Удалить</button>
+            <button class="cl-btn cl-btn-sm">Мелкая</button>
+            <button class="cl-btn cl-btn-primary is-loading">Загрузка</button>
+            <button class="cl-btn cl-btn-primary" disabled>Недоступна</button>
+          </div>
+          <div class="rule-cols" style="margin-top: var(--cl-space-5)">
+            <div class="rule rule-do">
+              <h4>Можно</h4>
+              <ul>
+                <li>Текст кнопки — глагол и результат: «Оплатить 1 490 ₽», а не «Далее».</li>
+                <li>На мобильном главная кнопка — во всю ширину, высота 44px.</li>
+                <li>Во время запроса — <code class="cl-mono">.is-loading</code>, кнопка не пропадает.</li>
+              </ul>
+            </div>
+            <div class="rule rule-dont">
+              <h4>Нельзя</h4>
+              <ul>
+                <li>Две <code class="cl-mono">cl-btn-cta</code> на одном экране.</li>
+                <li>Заливать кнопку янтарём: он означает выгоду, а не действие.</li>
+                <li>Блокировать кнопку без объяснения, чего не хватает.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Поля</h3>
+          <div class="cl-card">
+            <div class="cl-card-body">
+              <div class="cl-kv">
+                <label class="cl-field">
+                  <span class="cl-label">Название тарифа</span>
+                  <input class="cl-input" value="Год · безлимит" />
+                  <span class="cl-hint">Видит клиент в боте и на витрине</span>
+                </label>
+                <label class="cl-field">
+                  <span class="cl-label cl-label-required">Цена, ₽</span>
+                  <input class="cl-input is-invalid" value="-100" />
+                  <span class="cl-error-text">Цена должна быть больше нуля</span>
+                </label>
+                <label class="cl-field">
+                  <span class="cl-label">Период</span>
+                  <select class="cl-select">
+                    <option>30 дней</option>
+                    <option>90 дней</option>
+                    <option selected>365 дней</option>
+                  </select>
+                </label>
+                <label class="cl-field">
+                  <span class="cl-label">Отключено</span>
+                  <input class="cl-input" value="Недоступно" disabled />
+                </label>
+              </div>
+              <label class="cl-toggle" style="margin-top: var(--cl-space-2)">
+                <input type="checkbox" checked />
+                <span class="cl-toggle-track"><span class="cl-toggle-thumb"></span></span>
+                <span>Тариф виден клиентам</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Статусы</h3>
+          <div class="guide-demo">
+            <span class="cl-badge cl-badge-success"><span class="cl-dot cl-dot-success"></span>Активна</span>
+            <span class="cl-badge cl-badge-warning"><span class="cl-dot cl-dot-warning"></span>Истекает через 3 дня</span>
+            <span class="cl-badge cl-badge-danger"><span class="cl-dot cl-dot-danger"></span>Просрочена</span>
+            <span class="cl-badge cl-badge-info">Пробный период</span>
+            <span class="cl-badge">Черновик</span>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Сообщения</h3>
+          <div class="cl-stack">
+            <div class="cl-alert cl-alert-success">
+              <span class="cl-alert-body"><b>Оплата прошла.</b> Доступ продлён до 12 августа 2027. Ключ обновлять не нужно.</span>
+            </div>
+            <div class="cl-alert cl-alert-warning">
+              <span class="cl-alert-body"><b>Подписка истекает через 3 дня.</b> Продлите, чтобы не потерять текущий ключ.</span>
+            </div>
+            <div class="cl-alert cl-alert-danger">
+              <span class="cl-alert-body"><b>Банк отклонил платёж.</b> Деньги не списаны — попробуйте СБП или другую карту.</span>
+            </div>
+            <div class="cl-alert cl-alert-info">
+              <span class="cl-alert-body">Узел <span class="cl-mono">nl-1</span> в режиме обслуживания: клиенты переключены автоматически.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Карточка и таблица</h3>
+          <div class="cl-card">
+            <div class="cl-card-head">
+              <div>
+                <div class="cl-card-title">Последние платежи</div>
+                <div class="cl-card-subtitle">За 24 часа</div>
+              </div>
+              <button class="cl-btn cl-btn-sm">Экспорт</button>
+            </div>
+            <div class="cl-table-wrap">
+              <table class="cl-table">
+                <thead>
+                  <tr>
+                    <th>Клиент</th>
+                    <th>Тариф</th>
+                    <th>Сумма</th>
+                    <th>Способ</th>
+                    <th>Статус</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>@ivan</td>
+                    <td>Год · безлимит</td>
+                    <td class="cl-numeric">1 490 ₽</td>
+                    <td>СБП</td>
+                    <td><span class="cl-badge cl-badge-success">Оплачен</span></td>
+                  </tr>
+                  <tr>
+                    <td>@marina</td>
+                    <td>Месяц · 100 ГБ</td>
+                    <td class="cl-numeric">249 ₽</td>
+                    <td>Telegram Stars</td>
+                    <td><span class="cl-badge cl-badge-warning">Ожидает</span></td>
+                  </tr>
+                  <tr>
+                    <td>@pavel</td>
+                    <td>Месяц · 100 ГБ</td>
+                    <td class="cl-numeric">249 ₽</td>
+                    <td>Карта</td>
+                    <td><span class="cl-badge cl-badge-danger">Отклонён</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="cl-card-footer cl-small cl-muted">Показаны 3 из 148 операций</div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Загрузка и пустое состояние</h3>
+          <div class="guide-grid">
+            <div class="cl-card">
+              <div class="cl-card-body cl-stack" style="gap: var(--cl-space-2)">
+                <div class="cl-skeleton" style="width: 40%"></div>
+                <div class="cl-skeleton" style="width: 90%"></div>
+                <div class="cl-skeleton" style="width: 75%"></div>
+              </div>
+            </div>
+            <div class="cl-card">
+              <div class="cl-empty">
+                <div class="cl-empty-title">Платежей пока нет</div>
+                <div class="cl-empty-hint">Появятся здесь сразу после первой оплаты</div>
+                <button class="cl-btn cl-btn-primary cl-btn-sm" style="margin-top: var(--cl-space-4)">Создать тариф</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Иконки</h3>
+          <p class="cl-small cl-muted" style="margin-bottom: var(--cl-space-3)">
+            24px, обводка 1.5, скруглённые концы, наследуют цвет текста. Файлы —
+            <code class="cl-mono">assets/icons/</code>.
+          </p>
+          <div class="icon-grid">
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/shield-check.svg')"></span>shield-check</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/bolt.svg')"></span>bolt</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/globe.svg')"></span>globe</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/devices.svg')"></span>devices</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/switch.svg')"></span>switch</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/lock.svg')"></span>lock</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/eye-off.svg')"></span>eye-off</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/support.svg')"></span>support</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/wallet.svg')"></span>wallet</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/refund.svg')"></span>refund</div>
+            <div class="icon-cell"><span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>check</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section" id="sales">
+        <p class="cl-eyebrow">08 — Витрина</p>
+        <h2>Блоки продажи</h2>
+        <p class="cl-secondary">
+          Пять блоков закрывают путь до оплаты: обещание → доказательства → цена → как подключить →
+          что если не подойдёт. Собранный прототип — <a href="storefront.html">storefront.html</a>.
+        </p>
+
+        <div class="guide-block">
+          <h3>Полоса доверия · .cl-trustbar</h3>
+          <div class="cl-trustbar">
+            <div class="cl-trust-item">
+              <span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/eye-off.svg')"></span>
+              <div>
+                <div class="cl-trust-title">Логов нет</div>
+                <div class="cl-trust-text">Не храним историю подключений</div>
+              </div>
+            </div>
+            <div class="cl-trust-item">
+              <span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/switch.svg')"></span>
+              <div>
+                <div class="cl-trust-title">Автопереключение</div>
+                <div class="cl-trust-text">При блокировке канал меняется сам</div>
+              </div>
+            </div>
+            <div class="cl-trust-item">
+              <span class="cl-icon cl-icon-lg cl-icon-mask" style="--cl-icon: url('../assets/icons/wallet.svg')"></span>
+              <div>
+                <div class="cl-trust-title">Без автосписаний</div>
+                <div class="cl-trust-text">Платёж разовый, карта не сохраняется</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Тариф · .cl-plan</h3>
+          <div class="cl-plans">
+            <div class="cl-plan">
+              <div class="cl-plan-name">Месяц</div>
+              <div class="cl-plan-price">
+                <span class="cl-plan-amount">249 ₽</span>
+                <span class="cl-plan-period">/ месяц</span>
+              </div>
+              <div class="cl-plan-total">Списание один раз, продление вручную</div>
+              <ul class="cl-plan-features">
+                <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>100 ГБ трафика</li>
+                <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>3 устройства</li>
+              </ul>
+              <button class="cl-btn">Выбрать</button>
+            </div>
+            <div class="cl-plan is-featured">
+              <span class="cl-plan-flag">Выбирают чаще</span>
+              <div class="cl-plan-name">Год</div>
+              <div class="cl-plan-price">
+                <span class="cl-plan-amount">124 ₽</span>
+                <span class="cl-plan-period">/ месяц</span>
+                <span class="cl-plan-was">249 ₽</span>
+                <span class="cl-plan-save">−50%</span>
+              </div>
+              <div class="cl-plan-total">1 490 ₽ один раз за 12 месяцев</div>
+              <ul class="cl-plan-features">
+                <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>Безлимитный трафик</li>
+                <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>5 устройств</li>
+                <li><span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/check.svg')"></span>Приоритетная поддержка</li>
+              </ul>
+              <button class="cl-btn">Оплатить 1 490 ₽</button>
+            </div>
+          </div>
+          <div class="rule-cols" style="margin-top: var(--cl-space-5)">
+            <div class="rule rule-do">
+              <h4>Можно</h4>
+              <ul>
+                <li>Показывать цену за месяц и итоговую сумму одновременно.</li>
+                <li>Отмечать выгоду в процентах рядом со старой ценой.</li>
+                <li>Выделять один тариф — тот, что реально выгоднее клиенту.</li>
+              </ul>
+            </div>
+            <div class="rule rule-dont">
+              <h4>Нельзя</h4>
+              <ul>
+                <li>Показывать «старую цену», которой не было.</li>
+                <li>Больше трёх тарифов в ряд: выбор парализует.</li>
+                <li>Прятать лимиты трафика и устройств под ссылку «подробнее».</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Гарантия · .cl-guarantee</h3>
+          <div class="cl-guarantee">
+            <span class="cl-icon cl-icon-mask" style="--cl-icon: url('../assets/icons/refund.svg'); width: 36px; height: 36px"></span>
+            <div>
+              <div class="cl-guarantee-title">Не подойдёт — вернём деньги</div>
+              <div class="cl-guarantee-text">
+                7 дней на возврат без вопросов. Напишите в поддержку — вернём полную сумму тем же
+                способом, которым платили.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="guide-block">
+          <h3>Шаги · .cl-steps</h3>
+          <div class="cl-steps">
+            <div class="cl-step">
+              <div class="cl-step-title">Оплатите тариф</div>
+              <div class="cl-step-text">СБП, карта или Telegram Stars. Регистрация не нужна.</div>
+            </div>
+            <div class="cl-step">
+              <div class="cl-step-title">Откройте ссылку</div>
+              <div class="cl-step-text">Придёт в бот сразу после оплаты, одна на все устройства.</div>
+            </div>
+            <div class="cl-step">
+              <div class="cl-step-title">Готово</div>
+              <div class="cl-step-text">Приложение настроится само, ключ менять не придётся.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section" id="a11y">
+        <p class="cl-eyebrow">09 — Доступность</p>
+        <h2>Контраст</h2>
+        <p class="cl-secondary">
+          Таблица считается из живых значений токенов при загрузке страницы. Порог AA для обычного
+          текста — 4.5:1.
+        </p>
+        <table class="token-table">
+          <thead>
+            <tr>
+              <th>Пара</th>
+              <th style="width: 120px">Светлая</th>
+              <th style="width: 120px">Тёмная</th>
+            </tr>
+          </thead>
+          <tbody id="a11y-rows">
+            <tr>
+              <td class="cl-muted" colspan="3">Замер выполняется при загрузке страницы…</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="cl-small cl-muted" style="margin-top: var(--cl-space-3)">
+          Фокус — янтарная обводка 2px с отступом 2px, снимать её нельзя. Минимальная площадь нажатия
+          на мобильном — 44px (<code class="cl-mono">--cl-tap-target</code>).
+        </p>
+      </section>
+
+      <section class="guide-section" style="border-bottom: none">
+        <p class="cl-eyebrow">10 — Подключение</p>
+        <h2>Как использовать</h2>
+        <div class="cl-card">
+          <div class="cl-card-body cl-stack">
+            <div>
+              <p class="cl-strong">В приложении на Vite или Next</p>
+              <p class="cl-mono" style="margin-top: var(--cl-space-2)">import "@corelink/ui";</p>
+            </div>
+            <div>
+              <p class="cl-strong">Тема</p>
+              <p class="cl-mono" style="margin-top: var(--cl-space-2)">
+                &lt;html lang="ru" data-theme="dark"&gt; — витрина и кабинет. Без атрибута — светлая
+                админка.
+              </p>
+            </div>
+            <div>
+              <p class="cl-strong">Шрифты</p>
+              <p class="cl-mono" style="margin-top: var(--cl-space-2)">
+                Spectral 500/600, Manrope 400/500/600/700, IBM Plex Mono 400/500 — положить в
+                public/fonts и подключить через @font-face с font-display: swap.
+              </p>
+            </div>
+            <div>
+              <p class="cl-strong">Частями</p>
+              <p class="cl-mono" style="margin-top: var(--cl-space-2)">
+                import "@corelink/ui/tokens.css"; import "@corelink/ui/components.css";
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const root = document.documentElement;
+      const toggle = document.getElementById("theme-toggle");
+      const navLogo = document.getElementById("nav-logo");
+
+      const applyTheme = (dark) => {
+        if (dark) root.dataset.theme = "dark";
+        else delete root.dataset.theme;
+        toggle.textContent = dark ? "Светлая тема" : "Тёмная тема";
+        navLogo.src = dark ? "../assets/logo-lockup-dark.svg" : "../assets/logo-lockup.svg";
+      };
+
+      toggle.addEventListener("click", () => applyTheme(root.dataset.theme !== "dark"));
+
+      const luminance = (rgb) => {
+        const [r, g, b] = rgb.map((v) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+
+      const parseColor = (value) => String(value).match(/[\d.]+/g).map(Number);
+
+      // Мягкие фоны в тёмной теме полупрозрачные — сводим их на поверхность карточки.
+      const over = (parts, background) => {
+        const alpha = parts.length > 3 ? parts[3] : 1;
+        return [0, 1, 2].map((i) => Math.round(parts[i] * alpha + background[i] * (1 - alpha)));
+      };
+
+      const contrast = (a, b) => {
+        const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+        return ((high + 0.05) / (low + 0.05)).toFixed(1);
+      };
+
+      // Значение токена берём через реальный элемент: getPropertyValue отдаёт
+      // саму ссылку var(--…), а не подставленный цвет.
+      const resolve = (token) => {
+        const probe = document.createElement("div");
+        probe.style.color = `var(${token})`;
+        document.body.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return parseColor(color);
+      };
+
+      const PAIRS = [
+        ["Основной текст на фоне", "--cl-text", "--cl-bg"],
+        ["Второстепенный текст на карточке", "--cl-text-secondary", "--cl-surface"],
+        ["Приглушённый текст на карточке", "--cl-text-muted", "--cl-surface"],
+        ["Текст на кнопке действия", "--cl-on-primary", "--cl-primary"],
+        ["Текст на тёмной «главе»", "--cl-on-ink", "--cl-ink"],
+        ["Маркер в заголовке", "--cl-on-accent", "--cl-accent-marker"],
+        ["Ссылка на фоне", "--cl-link", "--cl-bg"],
+        ["Бейдж «активна»", "--cl-success-soft-fg", "--cl-success-soft"],
+        ["Бейдж «истекает»", "--cl-warning-soft-fg", "--cl-warning-soft"],
+        ["Бейдж «просрочена»", "--cl-danger-soft-fg", "--cl-danger-soft"],
+      ];
+
+      const measure = () => {
+        const surface = resolve("--cl-surface");
+        return PAIRS.map(([, fg, bg]) => contrast(resolve(fg), over(resolve(bg), surface)));
+      };
+
+      applyTheme(false);
+      const light = measure();
+      applyTheme(true);
+      const dark = measure();
+      applyTheme(false);
+
+      document.getElementById("a11y-rows").innerHTML = PAIRS.map(
+        ([label], i) =>
+          `<tr><td>${label}</td><td class="cl-numeric">${light[i]}</td><td class="cl-numeric">${dark[i]}</td></tr>`
+      ).join("");
+    </script>
+  </body>
+</html>

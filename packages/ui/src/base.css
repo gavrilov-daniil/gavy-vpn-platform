@@ -1,0 +1,242 @@
+/* CoreLink — базовый слой: сброс, типографика, утилиты общего назначения. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/*
+ * Прокрутка к якорю останавливается ниже липкой шапки — иначе заголовок
+ * секции оказывается под ней. Плавность не навязываем: на длинных страницах
+ * она превращается в двухсекундную поездку.
+ */
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-padding-top: calc(var(--cl-sticky-offset) + var(--cl-space-4));
+}
+
+body {
+  margin: 0;
+  background: var(--cl-bg);
+  color: var(--cl-text);
+  font-family: var(--cl-font-sans);
+  font-size: var(--cl-text-md);
+  line-height: var(--cl-leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+blockquote {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--cl-font-display);
+  font-weight: var(--cl-weight-semibold);
+  line-height: var(--cl-leading-snug);
+  letter-spacing: var(--cl-tracking-tight);
+}
+
+a {
+  color: var(--cl-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cl-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--cl-radius-sm);
+}
+
+::selection {
+  background: var(--cl-accent-marker);
+  color: var(--cl-on-accent);
+}
+
+/* --- Текстовые роли --- */
+
+.cl-display {
+  font-family: var(--cl-font-display);
+  font-size: var(--cl-text-5xl);
+  line-height: var(--cl-leading-tight);
+  letter-spacing: var(--cl-tracking-tight);
+  font-weight: var(--cl-weight-semibold);
+}
+
+.cl-h1 {
+  font-family: var(--cl-font-display);
+  font-size: var(--cl-text-3xl);
+}
+
+.cl-h2 {
+  font-family: var(--cl-font-display);
+  font-size: var(--cl-text-2xl);
+}
+
+.cl-h3 {
+  font-family: var(--cl-font-display);
+  font-size: var(--cl-text-xl);
+}
+
+.cl-lede {
+  font-size: var(--cl-text-xl);
+  line-height: var(--cl-leading-relaxed);
+  color: var(--cl-text-secondary);
+}
+
+/*
+ * Надзаголовок — моноширинный, с индексом секции. Нумерация даёт читателю
+ * ощущение документа, а не бесконечной ленты блоков.
+ */
+.cl-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cl-space-2);
+  font-family: var(--cl-font-mono);
+  font-size: var(--cl-text-xs);
+  font-weight: var(--cl-weight-medium);
+  letter-spacing: var(--cl-tracking-wide);
+  text-transform: uppercase;
+  color: var(--cl-text-muted);
+}
+
+.cl-eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  background: currentColor;
+}
+
+/*
+ * Акцент маркером: одно слово в заголовке подсвечено янтарной плашкой.
+ * Заменяет градиентный текст — работает и в печати, и в письме.
+ */
+.cl-marker {
+  display: inline-block;
+  padding: 0.06em 0.14em 0.14em;
+  line-height: 1;
+  background: var(--cl-accent-marker);
+  color: var(--cl-on-accent);
+}
+
+.cl-muted {
+  color: var(--cl-text-muted);
+}
+
+.cl-secondary {
+  color: var(--cl-text-secondary);
+}
+
+.cl-small {
+  font-size: var(--cl-text-xs);
+}
+
+.cl-strong {
+  font-weight: var(--cl-weight-semibold);
+}
+
+.cl-mono {
+  font-family: var(--cl-font-mono);
+  font-size: var(--cl-text-xs);
+}
+
+/* Деньги, трафик, сроки: моноширинные цифры не «пляшут» в колонках. */
+.cl-numeric {
+  font-family: var(--cl-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Раскладка --- */
+
+.cl-container {
+  width: 100%;
+  max-width: var(--cl-container);
+  margin: 0 auto;
+  padding-inline: var(--cl-space-6);
+}
+
+.cl-container-narrow {
+  max-width: var(--cl-container-narrow);
+}
+
+.cl-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cl-space-4);
+}
+
+.cl-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cl-space-3);
+  flex-wrap: wrap;
+}
+
+.cl-section {
+  padding-block: var(--cl-space-20);
+}
+
+.cl-rule {
+  height: 1px;
+  border: none;
+  margin: 0;
+  background: var(--cl-border);
+}
+
+/*
+ * Плотный тёмно-зелёный блок. Ставим один-два раза на странице: он делит
+ * витрину на «главы» и держит внимание там, где идут доказательства.
+ */
+.cl-ink-panel {
+  background: var(--cl-ink);
+  color: var(--cl-on-ink);
+}
+
+.cl-ink-panel .cl-muted,
+.cl-ink-panel .cl-secondary {
+  color: var(--cl-on-ink-muted);
+}
+
+.cl-ink-panel a {
+  color: var(--cl-on-ink);
+}
+
+@media (max-width: 720px) {
+  .cl-display {
+    font-size: var(--cl-text-4xl);
+  }
+
+  .cl-section {
+    padding-block: var(--cl-space-12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

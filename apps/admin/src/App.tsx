@@ -1,4 +1,5 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import logoDark from "@corelink/ui/assets/logo-lockup-dark.svg";
 import MerchantsPage from "./pages/MerchantsPage";
 import InfraPage from "./pages/InfraPage";
 import NodesPage from "./pages/NodesPage";
@@ -49,7 +50,9 @@ function Shell() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <div className="brand">CoreLink</div>
+        <div className="brand">
+          <img src={logoDark} alt="CoreLink" />
+        </div>
         <nav>
           {allowed.map((item) => (
             <NavLink key={item.to} to={item.to}>

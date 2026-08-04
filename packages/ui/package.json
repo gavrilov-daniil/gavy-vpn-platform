@@ -1,0 +1,21 @@
+{
+  "name": "@corelink/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": "./src/index.css",
+    "./tokens.css": "./src/tokens.css",
+    "./base.css": "./src/base.css",
+    "./components.css": "./src/components.css",
+    "./sales.css": "./src/sales.css",
+    "./assets/*": "./assets/*"
+  },
+  "files": [
+    "src",
+    "assets"
+  ]
+}
