@@ -63,6 +63,20 @@ PG_USER=$(env_value POSTGRES_USER); PG_USER=${PG_USER:-vpn}
 PG_DB=$(env_value POSTGRES_DB); PG_DB=${PG_DB:-vpn_platform}
 [ -n "$SUB_HOST" ] && [ -n "$ADMIN_HOST" ] || die "в .env нет SUB_PUBLIC_HOST или ADMIN_PUBLIC_HOST"
 
+# Бот — единственный сервис, который можно осознанно не поднимать: стенд без
+# BOT_TOKEN живёт и без него. Решает флаг, а не наличие токена: «забыл токен» и
+# «бот не нужен» должны различаться, иначе опечатка тихо снимает клиентского бота.
+BOT_ENABLED=$(env_value BOT_ENABLED)
+case "${BOT_ENABLED:-}" in
+  true|1|yes)
+    BOT_ENABLED=true
+    [ -n "$(env_value BOT_TOKEN)" ] || die "BOT_ENABLED=true, но BOT_TOKEN пуст — бот уйдёт в крэш-цикл"
+    COMPOSE+=(--profile bot)
+    ;;
+  *) BOT_ENABLED=false ;;
+esac
+export BOT_ENABLED
+
 # --- 1. Конфигурация ------------------------------------------------------------
 # Новая обязательная переменная, не заведённая в .env на хосте, иначе всплыла бы
 # крэш-циклом контейнера уже после того, как старый снят.
@@ -143,7 +157,11 @@ EOF
 fi
 
 # --- Откат ----------------------------------------------------------------------
-"${COMPOSE[@]}" logs --tail=100 core bot caddy || true
+# Выключенного бота в списке быть не должно: compose ответит «no such service» и
+# не покажет логи остальных — ровно в момент, когда они и нужны.
+log_services=(core caddy)
+[ "$BOT_ENABLED" = "true" ] && log_services+=(bot)
+"${COMPOSE[@]}" logs --tail=100 "${log_services[@]}" || true
 
 [ "$mode" != "--rollback" ] || die "откат тоже не прошёл проверку — разбираться руками"
 [ -f "$PREV_ENV" ] || die "проверка не прошла, откатываться не к чему — стенд остаётся на $VERSION"

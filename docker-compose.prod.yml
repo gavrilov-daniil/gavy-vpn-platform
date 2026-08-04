@@ -102,8 +102,13 @@ services:
       redis:
         condition: service_healthy
 
+  # Профиль, а не постоянный сервис: без BOT_TOKEN процесс падает на старте
+  # (apps/bot/src/config.ts), и с restart: unless-stopped контейнер уходил в вечный
+  # крэш-цикл — при этом релиз считался успешным, потому что проверок бота не было.
+  # Включается флагом BOT_ENABLED в .env, его разворачивает в --profile bot release.sh.
   bot:
     image: ${BOT_IMAGE:-ghcr.io/gavrilov-daniil/corelink-bot:local}
+    profiles: ["bot"]
     restart: unless-stopped
     logging: *logging
     env_file: .env
